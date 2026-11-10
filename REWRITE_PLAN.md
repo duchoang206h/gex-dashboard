@@ -123,11 +123,27 @@
 - Small commits per slice on `rewrite` branch with tests.
 - Rollback: revert to legacy module path/flag or previous commit; persisted data remains readable via compatibility readers.
 
-## 6. Immediate execution checklist (this session)
-- [x] Inspect repo/branch state
-- [x] Write rewrite plan
-- [ ] Create `rewrite` branch
-- [ ] Implement Phase 0 scaffolding (`gex/core/*`) + compatibility exports
-- [ ] Add and run new unit tests
-- [ ] Run full existing test suite and fix any regressions introduced
-- [ ] Commit progress on `rewrite`
+## 6. Execution status (rewrite branch)
+
+### Completed
+- [x] Inspect repo/branch state and preserve pre-existing local working-tree changes.
+- [x] Write rewrite plan.
+- [x] Create `rewrite` branch and commit incremental slices.
+- [x] **Phase 0 (scaffolding):** `gex/core` schemas/provenance/quality, event bus, interfaces, validation, package scaffolds, and tests.
+- [x] **Phase 1 (compute parity):** `gex/compute/greeks` + `gex/compute/metrics` wrappers delegating to legacy implementations, `gex/compute/pipeline` bridge to core contracts/metadata, and parity tests vs legacy outputs.
+- [x] **Phase 2 (provider adapter):** `gex/providers/cboe` adapter with capability metadata and normalization to `RawChainSnapshot`/provenance (legacy fetch backend injectable), plus tests.
+- [x] **Phase 3 (state/read model, additive):** `gex/state/readmodel` in-memory read model with freshness/quality/error/health tracking and tests; optional side-channel runtime (`gex/pipeline/runtime.py`, `GEX_REWRITE_PIPELINE=1`) updates read model/events from legacy ingestion without altering legacy behavior.
+- [x] **Phase 4 (storage metadata, additive):** sidecar manifest utilities (`gex/storage/metadata.py`) writing schema/provenance manifests per symbol; runtime emits manifests when enabled; tests. Existing Parquet formats remain unchanged for compatibility.
+- [x] **Phase 5 (serving/health, additive):** `gex/serve/health.py` and `/api/v1/rewrite/health` endpoint exposing rewrite read-model health when enabled; tests. Existing Dash/MCP/API contracts preserved.
+- [x] **Phase 6 (incremental cutover/docs):** plan updated with implementation status; new paths are additive/flagged or side-channel, keeping legacy defaults and entrypoints intact.
+
+### Validation
+- Added rewrite/phase tests: `tests/test_core_rewrite.py`, `tests/test_compute_parity_phase1.py`, `tests/test_compute_pipeline_phase1.py`, `tests/test_provider_cboe_phase2.py`, `tests/test_state_readmodel_phase3.py`, `tests/test_pipeline_runtime.py`, `tests/test_storage_metadata_phase4.py`, `tests/test_serve_health_phase5.py`.
+- Full regression suite run repeatedly during implementation: **all existing + new tests passing** (latest run recorded in commit/session notes: `612 passed, 1 skipped, 1 warning`).
+
+### Remaining follow-ups (post-foundation, non-breaking)
+- Wire provider/compute/read-model into scheduler/serving as primary paths behind feature flags after parity soak (currently side-channel/compat wrappers in place).
+- Expand adapters for dxFeed/futopt/idxopt/tick capture with unified capability/quality scoring.
+- Introduce versioned dataset manifests/readers and optional indexed hot-query backend (SQLite/DuckDB) for historical APIs without changing default storage.
+- Migrate streaming to a dedicated async/backpressured publisher and broaden contract tests for MCP/Discord consumers.
+- Remove legacy shims only after deprecation window and production parity validation.

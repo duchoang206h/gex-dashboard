@@ -103,6 +103,11 @@ def ingest_snapshot(symbol: str, snap: ChainSnapshot,
         f"{summary.zero_gamma:.0f}" if summary.zero_gamma else "n/a",
         f"{summary.basis:+.1f}" if summary.basis is not None else "n/a",
     )
+    try:
+        from .pipeline.runtime import RUNTIME
+        RUNTIME.on_legacy_snapshot(snap, enriched, summary, source="cboe")
+    except Exception:  # noqa: BLE001 - rewrite side-channel must never affect legacy path
+        log.debug("rewrite runtime hook failed", exc_info=True)
     return summary
 
 

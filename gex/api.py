@@ -518,3 +518,11 @@ def register_api(app) -> None:
             "text": d.to_text(),
             "signature": list(d.signature),
         })
+
+    @server.route("/api/v1/rewrite/health")
+    def _rewrite_health():
+        """Additive rewrite-pipeline health/read-model status (enabled via GEX_REWRITE_PIPELINE=1)."""
+        from .serve.health import rewrite_health
+        symbols = request.args.get("symbols")
+        syms = [s.strip() for s in symbols.split(",") if s.strip()] if symbols else None
+        return jsonify(rewrite_health(syms))
