@@ -13,7 +13,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
-from gex.core import EventBus, topics
+from gex.core import EnrichedSnapshotMeta, EventBus, topics
 from gex.state import ReadModel
 from gex.compute import pipeline as compute_pipeline
 
@@ -53,15 +53,15 @@ class RewriteRuntime:
         if not symbol:
             return
         try:
-            raw = compute_pipeline.wrap_raw_snapshot(legacy_snapshot, source=source, delayed=(source == "cboe"))
+            delayed = (source == "cboe")
+            raw = compute_pipeline.wrap_raw_snapshot(legacy_snapshot, source=source, delayed=delayed)
             self.events.publish(topics.SNAPSHOT_RECEIVED, raw)
-            prov = compute_pipeline.provenance_from_chain_snapshot(legacy_snapshot, source=source,
-                                                                     delayed=(source == "cboe"))
+            prov = compute_pipeline.provenance_from_chain_snapshot(
+                legacy_snapshot, source=source, delayed=delayed)
             rows = None
             if enriched is not None:
-                _, meta = compute_pipeline.enrich_chain_snapshot(legacy_snapshot, source=source,
-                                                                  delayed=(source == "cboe"))
-                meta.row_count = len(enriched)
+                # avoid recomputing enrichment: build metadata from provided artifact
+                meta = EnrichedSnapshotMeta(provenance=prov, row_count=len(enriched))
                 rows = len(enriched)
                 self.read_model.update_enriched(symbol, enriched, meta)
                 self.events.publish(topics.SNAPSHOT_ENRICHED, {"symbol": symbol, "rows": rows})

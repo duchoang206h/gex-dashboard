@@ -59,7 +59,8 @@ STATE = GlobalState()
 
 def ingest_snapshot(symbol: str, snap: ChainSnapshot,
                     persist_snapshot: bool,
-                    now: datetime | None = None) -> SummaryMetrics:
+                    now: datetime | None = None,
+                    source: str = "cboe") -> SummaryMetrics:
     """Intègre une chaîne DÉJÀ téléchargée dans STATE (et éventuellement disque).
 
     Séparé de `pull_symbol` pour le dashboard : quand l'utilisateur ajoute un
@@ -76,8 +77,9 @@ def ingest_snapshot(symbol: str, snap: ChainSnapshot,
         _primary = False
     if _primary:
         from .compute import pipeline as compute_pipeline
+        delayed = (source == "cboe")
         enriched, _meta = compute_pipeline.enrich_chain_snapshot(
-            snap, now_et=now, source="cboe", delayed=True)
+            snap, now_et=now, source=source, delayed=delayed)
         summary = compute_pipeline.summarize_chain_snapshot(
             snap, enriched, with_basis=u.future is not None)
     else:
@@ -119,7 +121,7 @@ def ingest_snapshot(symbol: str, snap: ChainSnapshot,
         from .pipeline.runtime import RUNTIME, primary_enabled
         if primary_enabled() and not RUNTIME.enabled:
             RUNTIME.enabled = True
-        RUNTIME.on_legacy_snapshot(snap, enriched, summary, source="cboe")
+        RUNTIME.on_legacy_snapshot(snap, enriched, summary, source=source)
     except Exception:  # noqa: BLE001 - rewrite side-channel must never affect legacy path
         log.debug("rewrite runtime hook failed", exc_info=True)
     return summary
