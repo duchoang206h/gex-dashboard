@@ -14,7 +14,7 @@ key, no payment**: the data comes from a free public source.
 
 > 🤖 **Already have Claude Code?** You can skip this whole guide: open Claude
 > Code in an empty folder and paste it the install prompt from the
-> [README](README.en.md#assisted-install-claude-code). It runs every step below
+> [README](README.md#assisted-install-claude-code). It runs every step below
 > for you. This manual guide is here for those who don't have Claude Code.
 
 ---
@@ -222,7 +222,7 @@ shared the program with you.
   - **If you used the ZIP** (method A): re-download the ZIP (step 2) and redo
     the install in the new folder. Keep your old `data/` folder if you want to
     preserve your history.
-- **Claude Code assistant**: if you use Claude Code, the [README](README.en.md)
+- **Claude Code assistant**: if you use Claude Code, the [README](README.md)
   offers a prompt that does the whole install for you.
 
 Enjoy — and remember it's an **analysis tool**, not investment advice (see the
