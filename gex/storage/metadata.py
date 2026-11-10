@@ -13,6 +13,30 @@ from typing import Any, Mapping
 
 from gex.config import SETTINGS
 from gex.core import SCHEMA_VERSION
+import glob as _glob
+
+
+def list_snapshot_manifests(base: Path | None = None) -> list[dict[str, Any]]:
+    """Versioned dataset manifest reader (additive): lists per-symbol snapshot manifests."""
+    d = manifests_dir(base)
+    out = []
+    for p in sorted(d.glob("*.snapshot.json")):
+        data = read_json(p)
+        if data:
+            data["_path"] = str(p)
+            out.append(data)
+    return out
+
+
+def dataset_manifest(base: Path | None = None) -> dict[str, Any]:
+    """Dataset-level manifest/index with schema version and known snapshot manifests."""
+    snaps = list_snapshot_manifests(base)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "snapshots": snaps,
+        "count": len(snaps),
+    }
 
 
 def _ensure_dir(path: Path) -> Path:

@@ -68,9 +68,21 @@ def ingest_snapshot(symbol: str, snap: ChainSnapshot,
     le prochain cycle de 60 s.
     """
     u = UNDERLYINGS[symbol]
-    enriched = metrics.enrich(snap)
-    summary = metrics.summarize(snap, enriched, with_basis=u.future is not None)
     now = now or datetime.now(ET)
+    try:
+        from .pipeline.runtime import primary_enabled
+        _primary = primary_enabled()
+    except Exception:
+        _primary = False
+    if _primary:
+        from .compute import pipeline as compute_pipeline
+        enriched, _meta = compute_pipeline.enrich_chain_snapshot(
+            snap, now_et=now, source="cboe", delayed=True)
+        summary = compute_pipeline.summarize_chain_snapshot(
+            snap, enriched, with_basis=u.future is not None)
+    else:
+        enriched = metrics.enrich(snap)
+        summary = metrics.summarize(snap, enriched, with_basis=u.future is not None)
 
     st = STATE.get(symbol)
     with STATE.lock:
@@ -104,7 +116,9 @@ def ingest_snapshot(symbol: str, snap: ChainSnapshot,
         f"{summary.basis:+.1f}" if summary.basis is not None else "n/a",
     )
     try:
-        from .pipeline.runtime import RUNTIME
+        from .pipeline.runtime import RUNTIME, primary_enabled
+        if primary_enabled() and not RUNTIME.enabled:
+            RUNTIME.enabled = True
         RUNTIME.on_legacy_snapshot(snap, enriched, summary, source="cboe")
     except Exception:  # noqa: BLE001 - rewrite side-channel must never affect legacy path
         log.debug("rewrite runtime hook failed", exc_info=True)
@@ -113,7 +127,16 @@ def ingest_snapshot(symbol: str, snap: ChainSnapshot,
 
 def pull_symbol(symbol: str, persist_snapshot: bool) -> None:
     u = UNDERLYINGS[symbol]
-    snap = fetch_chain(symbol, u.cboe_symbol)
+    try:
+        from .pipeline.runtime import primary_enabled
+        _primary = primary_enabled()
+    except Exception:
+        _primary = False
+    if _primary:
+        from .providers.cboe import CBOEChainProvider
+        snap = CBOEChainProvider().fetch_legacy(symbol)
+    else:
+        snap = fetch_chain(symbol, u.cboe_symbol)
     ingest_snapshot(symbol, snap, persist_snapshot)
 
 

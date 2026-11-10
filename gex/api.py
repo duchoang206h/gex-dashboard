@@ -526,3 +526,28 @@ def register_api(app) -> None:
         symbols = request.args.get("symbols")
         syms = [s.strip() for s in symbols.split(",") if s.strip()] if symbols else None
         return jsonify(rewrite_health(syms))
+
+    @server.route("/api/v1/rewrite/stream")
+    def _rewrite_stream():
+        """Additive SSE stream of rewrite summary updates via backpressured publisher."""
+        import json as _json
+        from flask import Response
+        from .serve.stream import STREAM_BUS
+        sub = STREAM_BUS.subscribe()
+
+        def gen():
+            try:
+                last_hb = time.monotonic()
+                while True:
+                    msg = STREAM_BUS.get(sub, timeout=15.0)
+                    if msg is not None:
+                        yield f"data: {_json.dumps(msg, default=str)}\n\n"
+                        last_hb = time.monotonic()
+                    elif time.monotonic() - last_hb >= 15.0:
+                        yield ": keepalive\n\n"
+                        last_hb = time.monotonic()
+            finally:
+                STREAM_BUS.unsubscribe(sub)
+
+        return Response(gen(), mimetype="text/event-stream",
+                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

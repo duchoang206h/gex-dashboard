@@ -1,8 +1,11 @@
-"""Optional rewrite runtime (flagged, side-channel).
+"""Optional rewrite runtime (flagged).
 
-Enabled with env var `GEX_REWRITE_PIPELINE=1`. When enabled, ingestion paths
-can publish normalized/enriched outputs to the rewrite read model and event bus
-without changing legacy STATE/storage behavior.
+Modes (env):
+- `GEX_REWRITE_PIPELINE=1|true|on`  -> side-channel updates (default off)
+- `GEX_REWRITE_PRIMARY=1|true|on`   -> primary compute path in ingestion (also enables runtime)
+- `GEX_REWRITE_INDEX=1|true|on`     -> optional SQLite hot-query index updates when runtime enabled
+
+All modes preserve legacy STATE/storage/API behavior.
 """
 from __future__ import annotations
 
@@ -15,14 +18,28 @@ from gex.state import ReadModel
 from gex.compute import pipeline as compute_pipeline
 
 
-def rewrite_enabled() -> bool:
-    v = os.environ.get("GEX_REWRITE_PIPELINE", "")
+def _env_on(name: str) -> bool:
+    v = os.environ.get(name, "")
     return v.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def rewrite_enabled() -> bool:
+    return _env_on("GEX_REWRITE_PIPELINE") or primary_enabled()
+
+
+def primary_enabled() -> bool:
+    return _env_on("GEX_REWRITE_PRIMARY")
+
+
+def index_enabled() -> bool:
+    return _env_on("GEX_REWRITE_INDEX")
 
 
 @dataclass
 class RewriteRuntime:
     enabled: bool = field(default_factory=rewrite_enabled)
+    primary: bool = field(default_factory=primary_enabled)
+    index: bool = field(default_factory=index_enabled)
     events: EventBus = field(default_factory=EventBus)
     read_model: ReadModel = field(default_factory=ReadModel)
 
@@ -50,13 +67,27 @@ class RewriteRuntime:
                 self.events.publish(topics.SNAPSHOT_ENRICHED, {"symbol": symbol, "rows": rows})
             if summary is not None:
                 self.read_model.update_summary(symbol, summary, prov)
-                self.events.publish(topics.SUMMARY_UPDATED, {"symbol": symbol})
+                payload = {"symbol": symbol}
+                self.events.publish(topics.SUMMARY_UPDATED, payload)
+                try:
+                    from gex.serve.stream import STREAM_BUS
+                    STREAM_BUS.publish({"topic": topics.SUMMARY_UPDATED, **payload}, topic=topics.SUMMARY_UPDATED)
+                except Exception:
+                    pass
             # additive sidecar manifest (phase 4) - must not affect legacy persistence
             try:
                 from gex.storage.metadata import write_snapshot_manifest
                 write_snapshot_manifest(symbol, prov.as_dict(), rows=rows)
             except Exception:
                 pass
+            # optional indexed hot-query backend (phase 4) - default off
+            if self.index or index_enabled():
+                try:
+                    from gex.storage.indexed import index_summary
+                    if summary is not None:
+                        index_summary(symbol, summary, prov.as_dict())
+                except Exception:
+                    pass
         except Exception:
             # must never impact legacy path
             try:

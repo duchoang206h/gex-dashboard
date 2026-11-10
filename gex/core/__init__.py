@@ -14,6 +14,7 @@ from .schemas import (
 from .events import Event, EventBus, topics
 from .interfaces import ChainProvider, SnapshotStore
 from .validation import ValidationError, require_non_empty, validate_provenance
+from .deprecation import DEPRECATED_SHIMS, warn_deprecated
 
 __all__ = [
     "SCHEMA_VERSION",
@@ -30,4 +31,7 @@ __all__ = [
     "ValidationError",
     "require_non_empty",
     "validate_provenance",
+    "DEPRECATED_SHIMS",
+    "warn_deprecated",
 ]
+

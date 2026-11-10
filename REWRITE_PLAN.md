@@ -142,8 +142,10 @@
 - Full regression suite run repeatedly during implementation: **all existing + new tests passing** (latest run recorded in commit/session notes: `612 passed, 1 skipped, 1 warning`).
 
 ### Remaining follow-ups (post-foundation, non-breaking)
-- Wire provider/compute/read-model into scheduler/serving as primary paths behind feature flags after parity soak (currently side-channel/compat wrappers in place).
-- Expand adapters for dxFeed/futopt/idxopt/tick capture with unified capability/quality scoring.
-- Introduce versioned dataset manifests/readers and optional indexed hot-query backend (SQLite/DuckDB) for historical APIs without changing default storage.
-- Migrate streaming to a dedicated async/backpressured publisher and broaden contract tests for MCP/Discord consumers.
-- Remove legacy shims only after deprecation window and production parity validation.
+- **(2, deferred by user request)** Expand adapters for dxFeed/futopt/idxopt/tick capture with unified capability/quality scoring — not implemented (user does not use these adapters).
+
+### Follow-ups completed in this iteration (except #2)
+- **Primary paths behind feature flags:** `GEX_REWRITE_PRIMARY=1` routes CBOE fetch/compute through rewrite provider+compute pipeline while preserving legacy STATE/storage behavior and updating read model/events (`gex/scheduler.py`, `gex/pipeline/runtime.py`, tests).
+- **Versioned dataset manifests/readers + optional indexed hot-query backend:** dataset manifest readers/index helpers (`gex/storage/metadata.py`) and optional SQLite summary index (`gex/storage/indexed.py`, `GEX_REWRITE_INDEX=1`) for fast latest/history queries without changing default Parquet storage (tests).
+- **Streaming/backpressure + contract tests:** dedicated backpressured pub/sub publisher (`gex/serve/stream.py`, `STREAM_BUS`), additive `/api/v1/rewrite/stream` SSE endpoint, runtime event publishing, and contract tests for MCP/API/stream consumers (`tests/test_stream_backpressure_phase5.py`, `tests/test_contracts_mcp_api.py`).
+- **Legacy shims deprecation (removal deferred by policy):** deprecation registry/opt-in warnings (`gex/core/deprecation.py`, `GEX_REWRITE_DEPRECATION_WARNINGS=1`) and shim markers; physical removal remains gated on parity soak + deprecation window (`tests/test_deprecation_phase5.py`).
