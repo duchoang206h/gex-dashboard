@@ -131,39 +131,39 @@ def _write_provenance(out_dir: Path, report: dict) -> None:
     destinataire sache ce qu'il reçoit et à quelles conditions."""
     days = report["days"]
     span = f"{days[0]} → {days[-1]}" if days else "—"
-    (out_dir / PROVENANCE_FILE).write_text(f"""# Provenance des données
+    (out_dir / PROVENANCE_FILE).write_text(f"""# Data provenance
 
-Export généré le {datetime.now():%Y-%m-%d %H:%M} par
+Export generated on {datetime.now():%Y-%m-%d %H:%M} by
 [gex-dashboard](https://github.com/Darthreign/gex-dashboard)
 (`python -m gex.export`).
 
-## Ce que contient cet export
+## What this export contains
 
-- **Source unique : l'endpoint public *delayed* de CBOE**, gratuit et
-  accessible sans compte.
-- Il ne s'agit pas de cotations brutes mais de **métriques dérivées** calculées
-  localement : GEX net, Gamma Flip, put/call ratios, agrégats de flux delta.
-- Sous-jacents : {', '.join(report['symbols']) or '—'}
-- Historique : {report['history_rows']} lignes
-- Flux : {report['flow_files']} fichiers-jour, {report['flow_rows']} barres ({span})
+- **Single source: the public *delayed* CBOE endpoint**, free and
+  accessible without an account.
+- These are not raw quotes but **derived metrics** computed
+  locally: net GEX, Gamma Flip, put/call ratios, delta flow aggregates.
+- Underlyings: {', '.join(report['symbols']) or '—'}
+- History: {report['history_rows']} rows
+- Flows: {report['flow_files']} day files, {report['flow_rows']} bars ({span})
 
-## Ce qu'il ne contient pas
+## What it does not contain
 
-Toute donnée issue d'une **source payante** (Databento, flux courtier) est
-exclue par construction : seules les lignes explicitement marquées
-`source = "cboe"` sont exportées. Ces sources sont soumises à une licence
-d'usage personnel non redistribuable.
+Any data from a **paid source** (Databento, broker feed) is
+excluded by construction: only rows explicitly marked
+`source = "cboe"` are exported. Those sources are subject to a
+personal-use, non-redistributable license.
 
-Lignes écartées à ce titre : {report['history_excluded']} en historique,
-{report['flow_excluded']} en flux.
+Rows excluded on that basis: {report['history_excluded']} in history,
+{report['flow_excluded']} in flows.
 
-## Utilisation
+## Usage
 
-Copier `history/` et `flows/` dans le dossier `data/` de votre propre
-instance. Vos collectes ultérieures s'y ajouteront normalement.
+Copy `history/` and `flows/` into the `data/` folder of your own
+instance. Your subsequent collections will be added there normally.
 
-Fourni **sans garantie**, à titre informatif, et ne constituant pas un conseil
-en investissement — voir l'[avertissement](https://github.com/Darthreign/gex-dashboard/blob/main/DISCLAIMER.md).
+Provided **without warranty**, for informational purposes only, and not constituting investment
+advice — see the [disclaimer](https://github.com/Darthreign/gex-dashboard/blob/main/DISCLAIMER.md).
 """, encoding="utf-8")
 
 
@@ -174,37 +174,37 @@ def main() -> None:
     setup_logging()
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--migrate", action="store_true",
-                    help="marque la provenance des données déjà collectées")
+                    help="mark the provenance of already-collected data")
     ap.add_argument("--out", type=Path, default=None,
-                    help="dossier de destination de l'export")
+                    help="destination folder for the export")
     ap.add_argument("--force", action="store_true",
-                    help="écrase le dossier de destination s'il existe")
+                    help="overwrite the destination folder if it exists")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
 
     if a.migrate:
         s = migrate(dry_run=a.dry_run)
-        log.info("Migration%s — historique : %d CBOE / %d Databento ; "
-                 "%d fichiers de flux marqués",
-                 " (simulation)" if a.dry_run else "",
+        log.info("Migration%s — history: %d CBOE / %d Databento; "
+                 "%d flow files marked",
+                 " (dry run)" if a.dry_run else "",
                  s["history_cboe"], s["history_databento"], s["flow_files"])
 
     if a.out:
         if a.out.exists():
             if not a.force:
-                raise SystemExit(f"{a.out} existe déjà — utiliser --force pour l'écraser.")
+                raise SystemExit(f"{a.out} already exists — use --force to overwrite it.")
             shutil.rmtree(a.out)
         r = export(a.out)
         if not r["history_rows"] and not r["flow_files"]:
-            log.warning("Export VIDE : aucune donnée marquée '%s'. "
-                        "Lancer --migrate d'abord, ou collecter en live.", SHAREABLE)
+            log.warning("Export EMPTY: no data marked '%s'. "
+                        "Run --migrate first, or collect live.", SHAREABLE)
             return
-        log.info("Export vers %s", a.out)
-        log.info("  historique : %d lignes (%d exclues)",
+        log.info("Export to %s", a.out)
+        log.info("  history : %d rows (%d excluded)",
                  r["history_rows"], r["history_excluded"])
-        log.info("  flux       : %d fichiers, %d barres (%d exclues)",
+        log.info("  flows   : %d files, %d bars (%d excluded)",
                  r["flow_files"], r["flow_rows"], r["flow_excluded"])
-        log.info("  %s joint", PROVENANCE_FILE)
+        log.info("  %s attached", PROVENANCE_FILE)
 
     if not a.migrate and not a.out:
         ap.print_help()

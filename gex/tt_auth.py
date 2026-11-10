@@ -54,8 +54,8 @@ def credentials() -> tuple[str, str]:
     secret = _env("TASTYTRADE_CLIENT_SECRET")
     if not cid or not secret:
         raise SystemExit(
-            "TASTYTRADE_CLIENT_ID / TASTYTRADE_CLIENT_SECRET introuvables "
-            "(variables d'environnement ou registre HKCU)."
+            "TASTYTRADE_CLIENT_ID / TASTYTRADE_CLIENT_SECRET not found "
+            "(environment variables or HKCU registry)."
         )
     return cid, secret
 
@@ -93,18 +93,18 @@ def store_refresh(token: str) -> str:
     """
     os.environ["TT_REFRESH"] = token
     if sys.platform != "win32":
-        return ("Jeton actif pour cette session. Pour le rendre permanent, "
-                'ajoute TT_REFRESH="…" à ton profil shell.')
+        return ("Token active for this session. To make it permanent, "
+                'add TT_REFRESH="…" to your shell profile.')
     import winreg
 
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0,
                             winreg.KEY_SET_VALUE) as k:
             winreg.SetValueEx(k, "TT_REFRESH", 0, winreg.REG_SZ, token)
-        return "Jeton enregistré (variable utilisateur TT_REFRESH)."
+        return "Token saved (TT_REFRESH user variable)."
     except OSError as exc:
-        return (f"Jeton actif pour cette session, mais non enregistré ({exc}). "
-                "Il faudra se reconnecter au prochain démarrage.")
+        return (f"Token active for this session, but not saved ({exc}). "
+                "You will need to reconnect on the next start.")
 
 
 def exchange_code(client_id: str, secret: str, code: str) -> dict:
@@ -120,36 +120,36 @@ def exchange_code(client_id: str, secret: str, code: str) -> dict:
         timeout=30,
     )
     if resp.status_code != 200:
-        raise SystemExit(f"Échec de l'échange ({resp.status_code}) : {resp.text[:400]}")
+        raise SystemExit(f"Exchange failed ({resp.status_code}): {resp.text[:400]}")
     return resp.json()
 
 
 def main() -> None:
     cid, secret = credentials()
-    print("\n1) Ouvre cette URL dans ton navigateur et approuve l'accès :\n")
+    print("\n1) Open this URL in your browser and approve access:\n")
     print(authorize_url(cid))
     print(
-        "\n2) Tu seras redirigé vers une page d'ERREUR (normal : rien n'écoute"
-        f"\n   sur {REDIRECT_URI}). Dans la barre d'adresse, copie la valeur"
-        "\n   du paramètre code=... (tout ce qui suit 'code=', avant un '&')\n"
+        "\n2) You will be redirected to an ERROR page (normal: nothing is listening"
+        f"\n   on {REDIRECT_URI}). In the address bar, copy the value"
+        "\n   of the code=... parameter (everything after 'code=', before an '&')\n"
     )
-    code = input("3) Colle le code ici : ").strip()
+    code = input("3) Paste the code here: ").strip()
     if not code:
-        raise SystemExit("Aucun code fourni.")
+        raise SystemExit("No code provided.")
 
     data = exchange_code(cid, secret, code)
     refresh = data.get("refresh_token")
     if not refresh:
-        raise SystemExit(f"Pas de refresh_token dans la réponse : {data}")
+        raise SystemExit(f"No refresh_token in the response: {data}")
 
     print("\n" + "=" * 62)
-    print("Refresh token obtenu. Enregistre les DEUX variables ci-dessous")
-    print("(noms imposés par le SDK tastytrade), puis relance ta session :\n")
+    print("Refresh token obtained. Save BOTH variables below")
+    print("(names required by the tastytrade SDK), then restart your session:\n")
     print(f'  setx TT_REFRESH "{refresh}"')
     print('  setx TT_SECRET "%TASTYTRADE_CLIENT_SECRET%"')
     print("=" * 62)
-    print("\nCe token est un secret de longue durée : ne le partage pas et ne")
-    print("le committe jamais dans le repo.\n")
+    print("\nThis token is a long-lived secret: do not share it and never")
+    print("commit it to the repository.\n")
 
 
 if __name__ == "__main__":

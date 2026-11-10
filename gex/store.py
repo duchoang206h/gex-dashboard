@@ -52,8 +52,8 @@ def _replace_with_retry(tmp: Path, path: Path) -> None:
                 from . import lockdiag
                 lockdiag.report_async(path)
                 log.error(
-                    "%s verrouille par un autre processus apres %d tentatives "
-                    "— ecriture perdue. Bougies de prix recuperables via "
+                    "%s locked by another process after %d attempts "
+                    "— write lost. Price candles recoverable via "
                     "`python -m gex.pricehist --days 3`.",
                     path.name, REPLACE_RETRIES)
                 raise

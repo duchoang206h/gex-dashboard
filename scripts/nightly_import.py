@@ -177,7 +177,7 @@ def _databento_session(day: str) -> pd.DataFrame:
     RAW.mkdir(parents=True, exist_ok=True)
     params = dict(dataset="GLBX.MDP3", symbols=["NQ.v.0"], stype_in="continuous",
                   schema="trades", start=start.isoformat(), end=end.isoformat())
-    log(f"   (databento) {day} : coût estimé {client.metadata.get_cost(**params):.4f} USD")
+    log(f"   (databento) {day} : estimated cost {client.metadata.get_cost(**params):.4f} USD")
     store = client.timeseries.get_range(**params, path=str(RAW / f"NQ_v0_trades_{day}.dbn.zst"))
     d = store.to_df(price_type="float").reset_index()
     ts = pd.to_datetime(d["ts_event"], utc=True)
@@ -196,37 +196,37 @@ def _write_if_new(df: pd.DataFrame, day: str, origin: str) -> None:
     IMPORT.mkdir(parents=True, exist_ok=True)
     out = IMPORT / f"{day}.parquet"
     if out.exists():
-        log(f"{day} : déjà présent dans import — NON réécrit.")
+        log(f"{day} : already present in import — NOT rewritten.")
         return
     base = [c for c in ["ts", "price", "volume", "side", "source"] if c in df.columns]
     extra = [c for c in ["bid", "ask", "ts_recv"] if c in df.columns]
     df = df[base + extra].sort_values("ts", kind="stable").reset_index(drop=True)
     df.to_parquet(out, index=False)
-    log(f"{day} : ÉCRIT ({origin}) — {len(df):,} lignes, colonnes {list(df.columns)}")
+    log(f"{day} : WRITTEN ({origin}) — {len(df):,} lignes, colonnes {list(df.columns)}")
 
 
 def main() -> None:
     day = target_day()
     if day is None:
-        log("Week-end / pas de séance — rien à importer.")
+        log("Weekend / no session — nothing to import.")
         return
     day = day.isoformat()
-    log(f"===== Import nocturne {day} — DÉBUT =====")
+    log(f"===== Nightly import {day} — START =====")
     try:
         if (IMPORT / f"{day}.parquet").exists():
-            log(f"{day} : déjà présent dans import — NON réécrit.")
+            log(f"{day} : already present in import — NOT rewritten.")
         else:
             live = _live_session(day)
             if _complete(live, day):
-                _write_if_new(live, day, "dxfeed live, bid/ask conservés")
+                _write_if_new(live, day, "dxfeed live, bid/ask kept")
             else:
                 where = "" if live.empty else (
-                    f" (live commence à "
+                    f" (live starts at "
                     f"{pd.to_datetime(live['ts'].min(), unit='s', utc=True).tz_convert(ET):%H:%M} ET)")
-                log(f"{day} : capture live incomplète{where} -> repli Databento.")
+                log(f"{day} : incomplete live capture{where} -> Databento fallback.")
                 _write_if_new(_databento_session(day), day, "databento, sans bid/ask")
     except Exception as e:  # noqa: BLE001
-        log(f"{day} : ÉCHEC import — {type(e).__name__}: {e}")
+        log(f"{day} : IMPORT FAILED — {type(e).__name__}: {e}")
     log(f"===== Import nocturne {day} — FIN =====")
 
 

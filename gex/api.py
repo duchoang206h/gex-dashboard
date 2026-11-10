@@ -176,12 +176,12 @@ def _close_context(symbol: str, day: str) -> dict:
         if chain is not None and not chain.empty:
             break
     if chain is None or chain.empty or "strike" not in chain or "gex" not in chain:
-        out["reason"] = "pas de snapshot de chaîne pour cette séance"
+        out["reason"] = "no chain snapshot for this session"
         return out
 
     bars = store.load_prices(symbol, day)
     if bars is None or bars.empty:
-        out["reason"] = "pas de bougies (prix de clôture indisponible)"
+        out["reason"] = "no candles (closing price unavailable)"
         return out
     bars = bars.sort_values("timestamp")
     target = pd.Timestamp(f"{day} 16:00:00")
@@ -209,7 +209,7 @@ def _tick_context(symbol: str, day: str, entry: float | None = None,
     ticks = store.load_ticks(symbol, day)
     out = {"symbol": symbol, "date": day}
     if ticks is None or ticks.empty:
-        out.update({"available": False, "reason": "pas de ticks capturés cette séance"})
+        out.update({"available": False, "reason": "no ticks captured this session"})
         return out
     split = datetime.combine(datetime.fromisoformat(day).date(),
                              dt_time(16, 0), ET).timestamp()
@@ -272,7 +272,7 @@ def register_api(app) -> None:
         symbol = symbol.upper()
         s, _ = _current_summary(symbol)
         if s is None:
-            return jsonify({"error": "indisponible (pas encore de premier pull)"}), 404
+            return jsonify({"error": "unavailable (no first pull yet)"}), 404
         return jsonify(_summary_dict(symbol, s))
 
     @server.route("/api/v1/<symbol>/levels")
@@ -280,7 +280,7 @@ def register_api(app) -> None:
         symbol = symbol.upper()
         s, df = _current_summary(symbol)
         if s is None or df is None:
-            return jsonify({"error": "indisponible (pas encore de premier pull)"}), 404
+            return jsonify({"error": "unavailable (no first pull yet)"}), 404
         # Source UNIQUE des niveaux (cf. metrics.compute_levels) : mêmes murs que
         # le dashboard. structural_spot = clôture veille (magnitude), live_spot =
         # spot courant en séance (côté). `?bucket=` fixe le périmètre d'échéances.
@@ -324,14 +324,14 @@ def register_api(app) -> None:
         symbol = symbol.upper()
         s, _ = _current_summary(symbol)
         if s is None:
-            return jsonify({"error": "indisponible (pas encore de premier pull)"}), 404
+            return jsonify({"error": "unavailable (no first pull yet)"}), 404
         r = metrics.regime_read(s.net_gex, s.net_dex)
         return jsonify({
             "symbol": symbol,
             "gex_frein": r["gex_frein"],
             "dex_sign": r["dex_sign"],
             "severity": r["severity"],
-            "disclaimer": "Lecture mécanique de la couverture dealers, pas un signal d'entrée.",
+            "disclaimer": "Mechanical dealer-hedging reading, not an entry signal.",
         })
 
     @server.route("/api/v1/<symbol>/strikes")
@@ -340,7 +340,7 @@ def register_api(app) -> None:
         bucket = request.args.get("bucket", "Tout")
         s, df = _current_summary(symbol)
         if s is None or df is None:
-            return jsonify({"error": "indisponible (pas encore de premier pull)"}), 404
+            return jsonify({"error": "unavailable (no first pull yet)"}), 404
         if bucket in EXPIRY_BUCKETS:
             today = datetime.now(ET).date()
             df = df[metrics.bucket_mask(df, bucket, today)]
@@ -392,10 +392,14 @@ def register_api(app) -> None:
         v = digest_mod._current_vix()
         if v is None:
             return jsonify({"available": False})
+        grade = digest_mod.vix_grade(float(v))
+        if grade:
+            grade = {**grade,
+                     "label": digest_mod.vix_grade_label("en", grade["label"])}
         return jsonify({"available": True, "vix": round(float(v), 2),
                         "seuil": digest_mod.VIX_SEUIL,
                         "above": bool(v > digest_mod.VIX_SEUIL),
-                        "grade": digest_mod.vix_grade(float(v))})
+                        "grade": grade})
 
     @server.route("/api/v1/<symbol>/spot")
     def _context_spot(symbol):
@@ -417,7 +421,7 @@ def register_api(app) -> None:
         spot = live if live is not None else (
             float(bars["close"].iloc[-1]) if not bars.empty else None)
         if spot is None:
-            return jsonify({"error": "indisponible (pas de cotation aujourd'hui)"}), 404
+            return jsonify({"error": "unavailable (no quote today)"}), 404
         out = {"symbol": symbol, "spot": round(float(spot), 4), "live": live is not None}
         if open_ is not None:
             out["open"] = round(open_, 4)
@@ -436,7 +440,7 @@ def register_api(app) -> None:
         symbol = symbol.upper()
         px = _futures_last_price(symbol)
         if px is None:
-            return jsonify({"error": "indisponible"}), 404
+            return jsonify({"error": "unavailable"}), 404
         return jsonify({"symbol": symbol, "price": scalp.round_to_tick(symbol, float(px))})
 
     @server.route("/api/v1/<symbol>/stream")
@@ -454,7 +458,7 @@ def register_api(app) -> None:
         from . import scalp
         symbol = symbol.upper()
         if symbol not in ("NQ", "ES"):
-            return jsonify({"error": "symbole non couvert (NQ/ES seulement)"}), 404
+            return jsonify({"error": "symbol not covered (NQ/ES only)"}), 404
 
         def gen():
             last_sent = None

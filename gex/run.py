@@ -1,7 +1,7 @@
 """Point d'entrée du dashboard, exposé comme commande ``gex-dashboard``.
 
 Démarre l'ingestion planifiée puis sert le dashboard Dash sur
-http://127.0.0.1:8050. Utilisable de trois façons équivalentes :
+http://127.0.0.1:9050. Utilisable de trois façons équivalentes :
 
     gex-dashboard            (après `pip install .`)
     python -m gex.run
@@ -19,7 +19,7 @@ from gex.scheduler import start_scheduler
 from gex.tickcapture import CAPTURE
 
 
-def main(host: str = "127.0.0.1", port: int = 8050) -> None:
+def main(host: str = "127.0.0.1", port: int = 9050) -> None:
     # console + logs/gex.log (rotatif) : la trace survit à la fermeture du terminal
     setup_logging()
     url = remote_url()

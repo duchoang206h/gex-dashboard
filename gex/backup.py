@@ -87,26 +87,26 @@ def run(remote: str = REMOTE, dry_run: bool = False) -> bool:
     doit pas interrompre la collecte.
     """
     if not rclone_path():
-        log.warning("rclone introuvable — sauvegarde ignorée")
+        log.warning("rclone not found — backup skipped")
         return False
     if not remote_configured(remote):
-        log.warning("Remote rclone '%s' non configuré — lancer `rclone config`",
+        log.warning("rclone remote '%s' not configured — run `rclone config`",
                     remote)
         return False
     cmd = build_command(remote, dry_run)
-    log.info("Sauvegarde vers %s: — %s", remote, SETTINGS.data_dir)
+    log.info("Backup to %s: — %s", remote, SETTINGS.data_dir)
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=3 * 3600)
     except Exception:  # noqa: BLE001
-        log.exception("Sauvegarde interrompue")
+        log.exception("Backup interrupted")
         return False
     tail = (res.stderr or res.stdout or "").strip().splitlines()[-4:]
     for line in tail:
         log.info("  %s", line)
     if res.returncode != 0:
-        log.error("rclone a échoué (code %d)", res.returncode)
+        log.error("rclone failed (code %d)", res.returncode)
         return False
-    log.info("Sauvegarde terminée")
+    log.info("Backup completed")
     return True
 
 
@@ -114,22 +114,22 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--remote", default=REMOTE)
     parser.add_argument("--dry-run", action="store_true",
-                        help="montre ce qui serait envoyé, sans rien envoyer")
+                        help="show what would be sent, without sending anything")
     parser.add_argument("--check", action="store_true",
-                        help="vérifie l'installation et la configuration")
+                        help="check the installation and configuration")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     if args.check:
         exe = rclone_path()
-        print(f"rclone           : {exe or 'ABSENT'}")
+        print(f"rclone           : {exe or 'MISSING'}")
         print(f"remote '{args.remote}' : "
-              f"{'configuré' if remote_configured(args.remote) else 'NON CONFIGURÉ'}")
+              f"{'configured' if remote_configured(args.remote) else 'NOT CONFIGURED'}")
         print(f"source           : {SETTINGS.data_dir}")
         print(f"destination      : {args.remote}:{REMOTE_PATH}")
         if not remote_configured(args.remote):
-            print(f"\nÀ faire : `rclone config`, créer un remote nommé "
-                  f"'{args.remote}' (Google Drive = option `drive`).")
+            print(f"\nTo do: `rclone config`, create a remote named "
+                  f"'{args.remote}' (Google Drive = `drive` option).")
         return
 
     run(args.remote, args.dry_run)

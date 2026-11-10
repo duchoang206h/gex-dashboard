@@ -44,18 +44,26 @@ _MAX_PENDING = 8
 
 
 def _page(titre: str, message: str, ok: bool) -> str:
-    """Page de retour minimale, aux couleurs du dashboard."""
-    couleur = "#22c55e" if ok else "#ef4444"
-    return f"""<!doctype html><html lang="fr"><head><meta charset="utf-8">
+    """Page de retour minimale, aux couleurs du thème courant."""
+    dark = request.cookies.get("gex_theme") == "dark"
+    couleur = "#7fd1a9" if ok and dark else ("#f28b82" if dark else
+                                             "#047857" if ok else "#dc2626")
+    bg = "#16181d" if dark else "#f2f2f0"
+    surface = "#1f2228" if dark else "#f7f7f4"
+    ink = "#e8e6e1" if dark else "#111827"
+    accent = "#7aa2f7" if dark else "#2563eb"
+    shadow = "rgba(0,0,0,.45)" if dark else "rgba(17,24,39,.12)"
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>{titre}</title></head>
-<body style="background:#0d0d0d;color:#e5e5e5;font-family:system-ui,sans-serif;
+<body style="background:{bg};color:{ink};font-family:system-ui,sans-serif;
              display:flex;align-items:center;justify-content:center;
              height:100vh;margin:0">
   <div style="max-width:34rem;padding:2rem;border-left:3px solid {couleur};
-              background:#151515">
+              background:{surface};border-radius:10px;
+              box-shadow:0 12px 40px {shadow}">
     <h1 style="margin:0 0 .6rem;font-size:1.1rem;color:{couleur}">{titre}</h1>
     <p style="margin:0 0 1.2rem;line-height:1.5">{message}</p>
-    <a href="/" style="color:#22d3ee">Retour au dashboard</a>
+    <a href="/" style="color:{accent}">Back to dashboard</a>
   </div>
 </body></html>"""
 
@@ -96,11 +104,11 @@ def connection_status() -> tuple[str, str]:
     secret = _env("TASTYTRADE_CLIENT_SECRET")
     refresh = _env("TT_REFRESH")
     if not cid or not secret:
-        return "absent", ("Identifiants d'application manquants "
+        return "absent", ("Missing application credentials "
                           "(TASTYTRADE_CLIENT_ID / _SECRET).")
     if not refresh:
-        return "deconnecte", "Application configurée — reste à autoriser l'accès."
-    return "connecte", "Compte tastytrade connecté (lecture seule)."
+        return "deconnecte", "Application configured — authorization still required."
+    return "connecte", "tastytrade account connected (read-only)."
 
 
 def register_oauth(app) -> None:
@@ -115,11 +123,11 @@ def register_oauth(app) -> None:
 
         cid = _env("TASTYTRADE_CLIENT_ID")
         if not cid:
-            return _page("Configuration incomplète",
-                         "TASTYTRADE_CLIENT_ID est introuvable. Crée une "
-                         "application OAuth chez tastytrade "
-                         "(Manage → My Profile → API), puis renseigne "
-                         "TASTYTRADE_CLIENT_ID et TASTYTRADE_CLIENT_SECRET.",
+            return _page("Incomplete configuration",
+                         "TASTYTRADE_CLIENT_ID is missing. Create an "
+                         "OAuth application on tastytrade "
+                         "(Manage → My Profile → API), then set "
+                         "TASTYTRADE_CLIENT_ID and TASTYTRADE_CLIENT_SECRET.",
                          ok=False), 400
         return redirect(tt_auth.authorize_url(cid, state=_remember_state()))
 
@@ -128,49 +136,49 @@ def register_oauth(app) -> None:
         erreur = request.args.get("error")
         if erreur:
             # refus explicite côté tastytrade : ce n'est pas une panne
-            return _page("Autorisation refusée",
-                         f"tastytrade a renvoyé : {erreur}. "
-                         "Rien n'a été enregistré.", ok=False), 400
+            return _page("Authorization denied",
+                         f"tastytrade returned: {erreur}. "
+                         "Nothing was saved.", ok=False), 400
 
         if not _consume_state(request.args.get("state")):
-            log.warning("OAuth : state invalide ou expiré, échange refusé")
-            return _page("Demande non reconnue",
-                         "Cette autorisation ne correspond à aucune demande "
-                         "partie de ce dashboard. Par sécurité, rien n'a été "
-                         "enregistré — relance depuis le bouton Connecter.",
+            log.warning("OAuth: invalid or expired state, exchange denied")
+            return _page("Unrecognized request",
+                         "This authorization does not match any request "
+                         "started from this dashboard. For safety, nothing was "
+                         "saved — restart from the Connect button.",
                          ok=False), 400
 
         code = request.args.get("code")
         if not code:
-            return _page("Code absent",
-                         "tastytrade n'a pas renvoyé de code d'autorisation.",
+            return _page("Missing code",
+                         "tastytrade did not return an authorization code.",
                          ok=False), 400
 
         try:
             cid, secret = tt_auth.credentials()
             data = tt_auth.exchange_code(cid, secret, code)
         except SystemExit as exc:      # tt_auth signale ses échecs ainsi
-            log.warning("OAuth : échange refusé (%s)", exc)
-            return _page("Échange refusé", str(exc), ok=False), 400
+            log.warning("OAuth: exchange denied (%s)", exc)
+            return _page("Exchange denied", str(exc), ok=False), 400
         except Exception:              # noqa: BLE001 — réseau, JSON malformé…
-            log.exception("OAuth : échec de l'échange du code")
-            return _page("Échec de l'échange",
-                         "Impossible de contacter tastytrade. "
-                         "Vérifie la connexion et réessaie.", ok=False), 502
+            log.exception("OAuth: code exchange failed")
+            return _page("Exchange failed",
+                         "Unable to contact tastytrade. "
+                         "Check the connection and try again.", ok=False), 502
 
         refresh = data.get("refresh_token")
         if not refresh:
-            return _page("Réponse inattendue",
-                         "Aucun refresh_token dans la réponse de tastytrade.",
+            return _page("Unexpected response",
+                         "No refresh_token in the tastytrade response.",
                          ok=False), 502
 
         note = tt_auth.store_refresh(refresh)
         # le jeton lui-même n'est JAMAIS journalisé
-        log.info("OAuth tastytrade : connexion réussie. %s", note)
+        log.info("tastytrade OAuth: connection successful. %s", note)
         _demarrer_les_flux()
-        return _page("Connecté à tastytrade",
-                     f"{note} Les flux temps réel démarrent — les données "
-                     "apparaîtront dans la minute.", ok=True)
+        return _page("Connected to tastytrade",
+                     f"{note} Real-time streams are starting — data "
+                     "will appear within a minute.", ok=True)
 
 
 def _demarrer_les_flux() -> None:
@@ -192,4 +200,4 @@ def _demarrer_les_flux() -> None:
                 TAPE.start()
                 CAPTURE.start()
     except Exception:  # noqa: BLE001 — un flux qui refuse de démarrer ne doit
-        log.exception("Démarrage des flux après connexion")
+        log.exception("Starting streams after connection")

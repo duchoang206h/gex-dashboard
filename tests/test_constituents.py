@@ -17,8 +17,12 @@ def test_cibles_et_constituants_disjoints():
     c = {u.key for u in constituents()}
     assert t & c == set()
     # NQ/ES : chaînes natives (gex/futopt.py), ajoutées à la suite des cibles
-    # CBOE — ce sont des cibles à part entière, affichables dans le sélecteur
-    assert t == {"SPX", "NDX", "SPY", "QQQ", "NQ", "ES"}
+    # CBOE — ce sont des cibles à part entière, affichables dans le sélecteur.
+    # Les tickers ajoutés depuis l'interface (data/tickers.json) sont admis en
+    # plus : ils doivent rester des cibles, jamais des constituants.
+    static = {"SPX", "NDX", "SPY", "QQQ", "NQ", "ES"}
+    assert static <= t
+    assert all(UNDERLYINGS[k].role == "target" for k in t - static)
 
 
 def test_nq_es_natifs_apres_les_cibles_cboe():
@@ -53,9 +57,12 @@ def test_scale_by_key_nq_reste_lie_a_ndx():
 
 
 def test_constituants_absents_des_echelles():
-    """Une échelle d'affichage doit rester un indice ou son future."""
+    """Une échelle d'affichage doit rester une cible (indice, future ou ticker
+    ajouté), jamais un constituant."""
     keys = {s.key for s in scales.available_scales()}
-    assert keys == {"SPX", "ES", "NDX", "NQ", "SPY", "QQQ"}
+    static = {"SPX", "ES", "NDX", "NQ", "SPY", "QQQ"}
+    assert static <= keys
+    assert all(UNDERLYINGS[k].role == "target" for k in keys)
     for u in constituents():
         assert u.key not in keys
 

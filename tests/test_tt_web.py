@@ -114,7 +114,7 @@ def test_refus_utilisateur_nest_pas_traite_comme_une_panne(client, monkeypatch):
     _identifiants(monkeypatch)
     r = client.get("/oauth/callback?error=access_denied")
     assert r.status_code == 400
-    assert "refus" in r.data.decode().lower()
+    assert "denied" in r.data.decode().lower()
 
 
 def test_pending_borne(client, monkeypatch):

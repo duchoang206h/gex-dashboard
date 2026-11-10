@@ -39,19 +39,19 @@ def test_exemple_1_vert():
     rows.append(_row("QQQ", -1e9, +1e9))
     d = digest.build_digest(rows, vix=14.0)
     assert d.color == "green"
-    assert "peu de risque" in d.verdict
-    assert "Gamma Positif - Delta Positif (Dealers long delta) sur SPX, SPY, NDX, ES et NQ" in d.lines
-    assert "Gamma Négatif - Delta Positif (Dealers long delta) sur QQQ" in d.lines
+    assert "little risk" in d.verdict
+    assert "Positive Gamma - Positive Delta (Dealers long delta) on SPX, SPY, NDX, ES and NQ" in d.lines
+    assert "Negative Gamma - Positive Delta (Dealers long delta) on QQQ" in d.lines
     # lecture de risque ajoutée sous l'état Gamma+ (et pas sous le Gamma−)
-    assert any("Short avec très peu de risque" in ln for ln in d.lines)
+    assert any("Short with very little risk" in ln for ln in d.lines)
     assert d.vix_line is None
 
 
 def test_symbol_reading_fr_et_en_suivent_le_digest():
     """Le bandeau (symbol_reading) dit EXACTEMENT ce que le bot dit, FR et EN."""
     fr = digest.symbol_reading(+1e9, -1e9, lang="fr")
-    assert fr["text"].startswith("Gamma Positif - Delta Négatif (Dealers short delta)")
-    assert "→ Réduire le risque sur les shorts | Long avec très peu de risque" in fr["text"]
+    assert fr["text"].startswith("Positive Gamma - Negative Delta (Dealers short delta)")
+    assert "→ Reduce risk on shorts | Long with very little risk" in fr["text"]
     en = digest.symbol_reading(+1e9, -1e9, lang="en")
     assert en["text"].startswith("Positive Gamma - Negative Delta (Dealers short delta)")
     assert "→ Reduce risk on shorts | Long with very little risk" in en["text"]
@@ -66,15 +66,15 @@ def test_close_message_sens_par_instrument():
     contre-sens du delta ; Gamma− → amplificateur."""
     # NQ & ES Gamma+ Delta− → MM long sur les deux
     d = digest.build_digest([_row(s, +1e9, -1e9) for s in ("NQ", "ES")], vix=12.0)
-    assert "**long** sur le NQ et l'ES" in d.close_message
-    assert "Stop le trading contrarien" in d.close_message
+    assert "**long** on NQ and ES" in d.close_message
+    assert "Stop contrarian trading" in d.close_message
     # NQ long (Delta−), ES short (Delta+)
     mix = digest.build_digest([_row("NQ", +1e9, -1e9), _row("ES", +1e9, +1e9)], vix=12.0)
-    assert "**long** sur le NQ" in mix.close_message and "**short** sur l'ES" in mix.close_message
+    assert "**long** on NQ" in mix.close_message and "**short** on ES" in mix.close_message
     # ES en gamma négatif → amplificateur
     ampli = digest.build_digest([_row("NQ", +1e9, -1e9), _row("ES", -1e9, +1e9)], vix=12.0)
-    assert "**long** sur le NQ" in ampli.close_message
-    assert "L'ES est en régime **amplificateur de mouvement**" in ampli.close_message
+    assert "**long** on NQ" in ampli.close_message
+    assert "ES is in a **movement-amplifying** regime" in ampli.close_message
 
 
 def test_verdict_vert_directionnel_selon_delta():
@@ -82,28 +82,28 @@ def test_verdict_vert_directionnel_selon_delta():
     d = digest.build_digest([_row(s, +1e9, -1e9) for s in
                              ("SPX", "SPY", "NDX", "QQQ", "ES", "NQ")], vix=12.0)
     assert d.color == "green"
-    assert "très peu de risque sur les longs" in d.verdict and "risqué sur les shorts" in d.verdict
+    assert "very little risk on longs" in d.verdict and "risky on shorts" in d.verdict
     d2 = digest.build_digest([_row(s, +1e9, +1e9) for s in
                               ("SPX", "SPY", "NDX", "QQQ", "ES", "NQ")], vix=12.0)
-    assert "très peu de risque sur les shorts" in d2.verdict
+    assert "very little risk on shorts" in d2.verdict
     # delta partagé (3 vs 3) → phrase neutre
     rows = [_row(s, +1e9, +1e9) for s in ("SPX", "SPY", "NDX")]
     rows += [_row(s, +1e9, -1e9) for s in ("QQQ", "ES", "NQ")]
     d3 = digest.build_digest(rows, vix=12.0)
-    assert d3.verdict == "Trading contrarien avec peu de risque sur session US."
+    assert d3.verdict == "Contrarian trading with little risk during the US session."
 
 
 def test_lecture_risque_ajoutee_seulement_sur_gamma_positif():
     """Gamma+ → une ligne de lecture du risque (asymétrie, pas un ordre) ;
     Gamma− → rien (le verdict contrarien couvre déjà)."""
     d1 = digest.build_digest([_row("SPX", +1e9, -1e9)], vix=12.0)   # Gamma+ Delta−
-    assert any("Réduire le risque sur les shorts | Long avec très peu de risque" in ln
+    assert any("Reduce risk on shorts | Long with very little risk" in ln
                for ln in d1.lines)
     d2 = digest.build_digest([_row("SPX", +1e9, +1e9)], vix=12.0)   # Gamma+ Delta+
-    assert any("Réduire le risque sur les longs | Short avec très peu de risque" in ln
+    assert any("Reduce risk on longs | Short with very little risk" in ln
                for ln in d2.lines)
     d3 = digest.build_digest([_row("SPX", -1e9, +1e9)], vix=12.0)   # Gamma−
-    assert not any("très peu de risque" in ln for ln in d3.lines)
+    assert not any("very little risk" in ln for ln in d3.lines)
 
 
 def test_orange_une_seule_famille_negative():
@@ -114,9 +114,9 @@ def test_orange_une_seule_famille_negative():
              _row("NQ", -1e9, +1e9)]
     d = digest.build_digest(rows, vix=13.0)
     assert d.color == "orange"
-    assert d.verdict == "Trading contrarien risqué sur session US."
+    assert d.verdict == "Contrarian trading risky during the US session."
     # NDX et QQQ (delta−) regroupés sur la ligne short
-    assert any("Delta Négatif (Dealers short delta) sur NDX et QQQ" in ln for ln in d.lines)
+    assert any("Negative Delta (Dealers short delta) on NDX and QQQ" in ln for ln in d.lines)
 
 
 def test_deux_familles_negatives_rouge():
@@ -127,7 +127,7 @@ def test_deux_familles_negatives_rouge():
     rows += [_row("QQQ", -1e9, -1e9), _row("NDX", -1e9, -1e9)]
     d = digest.build_digest(rows, vix=13.0)
     assert d.color == "red"
-    assert "déconseillé" in d.verdict.lower()
+    assert "discouraged" in d.verdict.lower()
 
 
 def test_exemple_3_rouge_fort_gamma_negatif():
@@ -137,8 +137,8 @@ def test_exemple_3_rouge_fort_gamma_negatif():
     rows += [_row(s, -5e9, +1e9, hist=hist_fort) for s in ("QQQ", "NDX", "NQ")]
     d = digest.build_digest(rows, vix=15.0)
     assert d.color == "red"
-    assert "déconseillé" in d.verdict.lower()
-    assert any("Fort Gamma Négatif" in ln and "NDX, QQQ et NQ" in ln for ln in d.lines)
+    assert "discouraged" in d.verdict.lower()
+    assert any("Strong Negative Gamma" in ln and "NDX, QQQ and NQ" in ln for ln in d.lines)
 
 
 def test_vix_eleve_favorable_au_contrarien_ne_change_pas_la_couleur():
@@ -149,9 +149,9 @@ def test_vix_eleve_favorable_au_contrarien_ne_change_pas_la_couleur():
     for vix in (18.5, 22.0, 30.0):
         d = digest.build_digest(rows, vix=vix)
         assert d.color == "green"
-        assert "peu de risque" in d.verdict
-        assert "favorables au contrarien" in d.vix_line
-    assert any("Delta Négatif (Dealers short delta) sur QQQ" in ln for ln in d.lines)
+        assert "little risk" in d.verdict
+        assert "favorable intraday whipsaws for contrarians" in d.vix_line
+    assert any("Negative Delta (Dealers short delta) on QQQ" in ln for ln in d.lines)
 
 
 def test_vix_bas_prudence_contrarien_sans_changer_la_couleur():
@@ -159,7 +159,7 @@ def test_vix_bas_prudence_contrarien_sans_changer_la_couleur():
     rows = [_row(s, +1e9, +1e9) for s in ("SPX", "SPY", "NDX", "ES", "NQ")]
     d = digest.build_digest(rows, vix=11.0)
     assert d.color == "green"
-    assert "directionnel possible" in d.vix_line and "prudence" in d.vix_line
+    assert "directional move possible" in d.vix_line and "caution" in d.vix_line
     assert digest.build_digest(rows, vix=15.0).vix_line is None
 
 
@@ -167,7 +167,7 @@ def test_fort_exige_de_l_historique():
     """Sans 20 points d'historique, pas de 'Fort' deviné — juste 'Gamma
     Négatif'."""
     d = digest.build_digest([_row("SPX", -5e9, +1e9, hist=[-1e8] * 5)], vix=12.0)
-    assert d.lines[0].startswith("Gamma Négatif -")
+    assert d.lines[0].startswith("Negative Gamma -")
 
 
 def test_vix_grade_paliers():
@@ -184,7 +184,7 @@ def test_vix_grade_paliers():
 def test_header_paris_avec_offset():
     now = datetime(2026, 7, 30, 6, 30, tzinfo=ZoneInfo("UTC"))   # 08h30 Paris (CEST)
     d = digest.build_digest([_row("SPX", +1e9, +1e9)], vix=12.0, now=now)
-    assert d.header == "État du gamma à 8h30 GMT+2 (Paris)"
+    assert d.header == "Gamma state at 8:30 GMT+2 (Paris)"
 
 
 def test_signature_change_sur_bascule_de_regime():
@@ -257,7 +257,7 @@ def test_confiance_forte_quand_famille_complete_et_concordante():
     rows = [_row(s, +1e9, +1e9) for s in ("SPX", "SPY", "ES", "NDX", "QQQ", "NQ")]
     d = digest.build_digest(rows, vix=12.0)
     assert d.confidence == "forte"
-    assert "Confiance : Forte" in d.to_text()
+    assert "Confidence: High" in d.to_text()
 
 
 def test_confiance_faible_si_indice_principal_absent():
@@ -307,7 +307,7 @@ def test_lecture_risque_couvre_le_gamma_negatif():
             assert "\n" in txt, f"pas de ligne de risque (gex={gex}, dex={dex})"
             risque = txt.splitlines()[1]
             assert "amplification" in risque.lower() or "amplifi" in risque.lower()
-            assert "sans filet" in risque
+            assert "No cushion" in risque
 
 
 def test_gamma_negatif_symetrique_contrairement_au_positif():
@@ -333,10 +333,10 @@ def test_gamma_label_traduit_en_anglais():
     en EN, _GAMMA_EN existait mais n'etait jamais appele."""
     assert digest.gamma_label("en", "Gamma Positif") == "Positive Gamma"
     assert digest.gamma_label("en", "Fort Gamma Négatif") == "Strong Negative Gamma"
-    assert digest.gamma_label("fr", "Gamma Positif") == "Gamma Positif"
+    assert digest.gamma_label("fr", "Gamma Positif") == "Positive Gamma"
 
 
 def test_vix_grade_label_traduit_en_anglais():
     assert digest.vix_grade_label("en", "Normal-haut") == "Normal-high"
     assert digest.vix_grade_label("en", "Calme") == "Calm"
-    assert digest.vix_grade_label("fr", "Normal-haut") == "Normal-haut"
+    assert digest.vix_grade_label("fr", "Normal-haut") == "Normal-high"

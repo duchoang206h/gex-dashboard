@@ -66,7 +66,7 @@ def _api_key() -> str:
         except OSError:
             pass
     if not key:
-        raise RuntimeError("DATABENTO_API_KEY introuvable (env ou registre HKCU).")
+        raise RuntimeError("DATABENTO_API_KEY not found (env or HKCU registry).")
     return key
 
 
@@ -90,10 +90,10 @@ def download(client, schema: str, start: date, end: date, query_end=None) -> Pat
     """
     path = _raw_path(schema, start, end)
     if path.exists():
-        log.info("%s : déjà téléchargé (%s)", schema, path.name)
+        log.info("%s: already downloaded (%s)", schema, path.name)
         return path
     qend = query_end if query_end is not None else end
-    log.info("Téléchargement %s %s→%s …", schema, start, qend)
+    log.info("Downloading %s %s→%s …", schema, start, qend)
     from databento.common.error import BentoClientError, BentoServerError
     import time as _time
     for attempt in range(4):
@@ -108,16 +108,16 @@ def download(client, schema: str, start: date, end: date, query_end=None) -> Pat
             avail = _avail_end_from_error(e)
             if avail is None or attempt == 3:
                 raise
-            log.warning("%s : borne recalée sur %s", schema, avail)
+            log.warning("%s: end bound adjusted to %s", schema, avail)
             qend = avail
         except BentoServerError as e:
             if attempt == 3:
                 raise
             wait = 30 * (attempt + 1)
-            log.warning("Passerelle Databento en erreur (%s), retry dans %d s…", e, wait)
+            log.warning("Databento gateway error (%s), retrying in %d s…", e, wait)
             _time.sleep(wait)
     data.to_file(path)
-    log.info("%s : %.1f Mo", schema, path.stat().st_size / 1e6)
+    log.info("%s: %.1f MB", schema, path.stat().st_size / 1e6)
     return path
 
 
@@ -192,7 +192,7 @@ def load_spots() -> dict[str, dict[date, float]]:
         days = pd.to_datetime(df[datecol], format=fmt).dt.date
         vals = pd.to_numeric(df[valcol], errors="coerce")
         out[sym] = {d: float(v) for d, v in zip(days, vals) if np.isfinite(v)}
-        log.info("Spots %s : %d jours (dernier %s)", sym, len(out[sym]), max(out[sym]))
+        log.info("Spots %s: %d days (latest %s)", sym, len(out[sym]), max(out[sym]))
     return out
 
 def _t_years(expiries: pd.Series, day: date) -> np.ndarray:
@@ -247,7 +247,7 @@ def build_day(chain: pd.DataFrame, symbol: str, day: date,
     if spot is None:
         spot = spot_from_parity(chain, day)
     if spot is None or not np.isfinite(spot):
-        log.warning("%s %s : spot indisponible (source externe et parité), jour ignoré",
+        log.warning("%s %s: spot unavailable (external source and parity), day skipped",
                     symbol, day)
         return None
     t = _t_years(chain["expiry"], day)
@@ -273,7 +273,7 @@ def build_day(chain: pd.DataFrame, symbol: str, day: date,
         try:
             store.save_snapshot(symbol, d, datetime.combine(day, time(16, 0)))
         except Exception:  # noqa: BLE001 — l'historique prime sur le snapshot
-            log.exception("%s %s : échec d'écriture du snapshot", symbol, day)
+            log.exception("%s %s: snapshot write failed", symbol, day)
     oi_c = d.loc[is_call, "open_interest"].sum()
     oi_p = d.loc[~is_call, "open_interest"].sum()
     v_c = d.loc[is_call, "volume"].sum()
@@ -347,7 +347,7 @@ def run(daily_days: int, intraday_days: int, max_cost: float, dry_run: bool,
         if avail is None:
             raise
         query_end = avail
-        log.info("Borne de fin calée sur la disponibilité réelle : %s", query_end)
+        log.info("End bound set to actual availability: %s", query_end)
 
     plan = [("definition", daily_start), ("statistics", daily_start),
             ("ohlcv-1d", daily_start)]
@@ -361,13 +361,13 @@ def run(daily_days: int, intraday_days: int, max_cost: float, dry_run: bool,
         c = client.metadata.get_cost(dataset=DATASET, symbols=PARENTS,
                                      stype_in="parent", schema=schema,
                                      start=str(start), end=str(query_end))
-        log.info("Devis %-12s %s→%s : %.2f $", schema, start, query_end, c)
+        log.info("Cost estimate %-12s %s→%s: %.2f $", schema, start, query_end, c)
         total += c
-    log.info("Coût total des téléchargements restants : %.2f $ (plafond %.2f $)", total, max_cost)
+    log.info("Total cost of remaining downloads: %.2f $ (cap %.2f $)", total, max_cost)
     if total > max_cost:
-        raise SystemExit(f"Coût {total:.2f} $ > plafond {max_cost} $ — abandon.")
+        raise SystemExit(f"Cost {total:.2f} $ > cap {max_cost} $ — aborting.")
     if dry_run:
-        log.info("--dry-run : arrêt avant téléchargement.")
+        log.info("--dry-run: stop before downloading.")
         return
 
     paths = {schema: download(client, schema, start, end, query_end=query_end)
@@ -376,7 +376,7 @@ def run(daily_days: int, intraday_days: int, max_cost: float, dry_run: bool,
     defs = load_definitions(paths["definition"])
     oi = load_open_interest(paths["statistics"])
     eod = load_eod(paths["ohlcv-1d"])
-    log.info("Référentiel : %d contrats ; OI : %d lignes ; EOD : %d lignes",
+    log.info("Definitions: %d contracts; OI: %d rows; EOD: %d rows",
              len(defs), len(oi), len(eod))
 
     hist_path = SETTINGS.data_dir / "history" / "metrics.parquet"
@@ -410,11 +410,11 @@ def run(daily_days: int, intraday_days: int, max_cost: float, dry_run: bool,
         merged = merged.sort_values(["symbol", "timestamp"])
         hist_path.parent.mkdir(parents=True, exist_ok=True)
         merged.to_parquet(hist_path, index=False)
-    log.info("Historique quotidien : %d jours ajoutés", len(new_rows))
+    log.info("Daily history: %d days added", len(new_rows))
 
     # flux intraday
     if "ohlcv-1m" not in paths:
-        log.info("Flux intraday : ignoré (--intraday-days 0)")
+        log.info("Intraday flow: ignored (--intraday-days 0)")
         return
     m1 = _to_df(paths["ohlcv-1m"]).reset_index()
     ts = pd.to_datetime(m1["ts_event"], utc=True).dt.tz_convert(ET)
@@ -437,7 +437,7 @@ def run(daily_days: int, intraday_days: int, max_cost: float, dry_run: bool,
         out_path.parent.mkdir(parents=True, exist_ok=True)
         flows.to_parquet(out_path, index=False)
         n_files += 1
-    log.info("Flux intraday : %d fichiers jour écrits", n_files)
+    log.info("Intraday flow: %d day files written", n_files)
 
 
 def main() -> None:
@@ -449,10 +449,10 @@ def main() -> None:
     ap.add_argument("--max-cost", type=float, default=40.0)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--no-chains", action="store_true",
-                    help="ne pas enregistrer les chaînes reconstruites "
-                         "(elles servent au backtest de niveaux)")
+                    help="do not save the reconstructed chains "
+                         "(they are used by the levels backtest)")
     ap.add_argument("--end", type=lambda s: date.fromisoformat(s), default=None,
-                    help="borne de fin EXCLUSIVE (défaut : hier)")
+                    help="EXCLUSIVE end bound (default: yesterday)")
     a = ap.parse_args()
     run(a.daily_days, a.intraday_days, a.max_cost, a.dry_run, end=a.end,
         persist_chains=not a.no_chains)

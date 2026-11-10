@@ -48,7 +48,7 @@ def main(apply: bool) -> None:
         if u != {day}:
             wrong[day] = u
     if not wrong:
-        print("Tout est déjà conforme — rien à faire.")
+        print("Everything is already compliant — nothing to do.")
         return
     print(f"fichiers non conformes : {len(wrong)}")
 
@@ -64,10 +64,10 @@ def main(apply: bool) -> None:
         for k in (-1, 0, 1):
             span.add((d0 + dt.timedelta(days=k)).isoformat())
     rebuild = sorted(d for d in span if (DIR / f"{d}.parquet").exists())
-    print(f"séances à reconstruire : {len(rebuild)}  ({rebuild[0]} -> {rebuild[-1]})")
+    print(f"sessions to rebuild: {len(rebuild)}  ({rebuild[0]} -> {rebuild[-1]})")
 
     if not apply:
-        print("\n[DRY-RUN] rien n'est écrit. Relancer avec --apply pour appliquer.")
+        print("\n[DRY-RUN] nothing is written. Re-run with --apply to apply.")
         return
 
     # 3. Reconstruction en fenêtre glissante vers un dossier temporaire.
@@ -99,11 +99,11 @@ def main(apply: bool) -> None:
         print(f"  {day}: {len(load(day)):>7,} -> {len(keep):>7,}")
 
     # 4. Vérification : aucune ligne perdue sur la plage reconstruite.
-    print(f"\nlignes avant {rows_before:,} | après {rows_after:,} | "
-          f"écart {rows_after - rows_before:+,}")
+    print(f"\nrows before {rows_before:,} | after {rows_after:,} | "
+          f"delta {rows_after - rows_before:+,}")
     if rows_after != rows_before:
-        print("⚠️  Écart de lignes sur la plage — c'est ATTENDU seulement si des "
-              "lignes viennent de fichiers hors plage. Vérification globale :")
+        print("⚠️  Row-count mismatch over the range — this is EXPECTED only if "
+              "rows come from files outside the range. Global check:")
     # somme totale du dataset (plage reconstruite remplacée par le tmp)
     total_old = total_new = 0
     for p in files:
@@ -112,10 +112,10 @@ def main(apply: bool) -> None:
         total_new += n if p.stem not in set(rebuild) else 0
     for d in rebuild:
         total_new += len(pd.read_parquet(TMP / f"{d}.parquet", columns=["ts"]))
-    print(f"TOTAL dataset avant {total_old:,} | après {total_new:,} | "
-          f"écart {total_new - total_old:+,}")
+    print(f"TOTAL dataset before {total_old:,} | after {total_new:,} | "
+          f"delta {total_new - total_old:+,}")
     if total_new != total_old:
-        print("❌ Perte/duplication détectée — BASCULE ANNULÉE, tmp conservé.")
+        print("❌ Loss/duplication detected — SWITCH ABORTED, tmp kept.")
         sys.exit(1)
 
     # 5. Bascule : sauvegarde des originaux puis remplacement.
@@ -124,7 +124,7 @@ def main(apply: bool) -> None:
         shutil.copy2(DIR / f"{d}.parquet", BAK / f"{d}.parquet")
         shutil.move(str(TMP / f"{d}.parquet"), str(DIR / f"{d}.parquet"))
     shutil.rmtree(TMP, ignore_errors=True)
-    print(f"\n✅ {len(rebuild)} séances réécrites en ET. Sauvegarde : {BAK}")
+    print(f"\n✅ {len(rebuild)} sessions rewritten in ET. Backup: {BAK}")
 
 
 if __name__ == "__main__":

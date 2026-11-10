@@ -79,7 +79,7 @@ hausse/baisse global.
 >   du fichier. Si une exécution se bloque à nouveau, ce log dira exactement
 >   sur quelle étape — ce qu'on n'a pas pu déterminer cette fois.
 
-**Dashboard local** (`http://127.0.0.1:8050`) — s'il ne répond pas, écris-le et
+**Dashboard local** (`http://127.0.0.1:9050`) — s'il ne répond pas, écris-le et
 continue avec ce que tu as :
 - `/api/v1/digest` — état par symbole, couleur, confiance, verdict
 - `/api/v1/NQ/levels` — Gamma Flip, HVL, Call Wall, Put Support, 1D min/max, murs

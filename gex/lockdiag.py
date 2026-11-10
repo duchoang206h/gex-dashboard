@@ -93,7 +93,7 @@ def who_locks(path: Path) -> list[dict]:
         finally:
             rm.RmEndSession(session)
     except Exception:  # noqa: BLE001 — le diagnostic ne doit jamais casser l'appelant
-        log.debug("Restart Manager indisponible", exc_info=True)
+        log.debug("Restart Manager unavailable", exc_info=True)
         return []
 
 
@@ -134,18 +134,18 @@ def report(path: Path) -> None:
         for h in holders:
             lignes.append(f"    PID {h['pid']} — {h['nom']} ({h['type']})")
             lignes.append(f"        {h['cmdline']}")
-        log.error("Fichier verrouillé par : %s",
+        log.error("File locked by: %s",
                   ", ".join(f"{h['nom']} (PID {h['pid']})" for h in holders))
     else:
-        lignes = [f"{horo} | {path} : échec d'écriture mais AUCUN processus "
-                  f"détenteur signalé (antivirus/indexeur, ou verrou déjà relâché)"]
-        log.error("Échec d'écriture sur %s sans détenteur identifiable "
-                  "(antivirus ou indexeur ?)", path.name)
+        lignes = [f"{horo} | {path} : write failed but NO process "
+                  f"holder reported (antivirus/indexer, or lock already released)"]
+        log.error("Write failed on %s with no identifiable holder "
+                  "(antivirus or indexer?)", path.name)
     try:
         with open(_log_path(), "a", encoding="utf-8") as f:
             f.write("\n".join(lignes) + "\n")
     except Exception:  # noqa: BLE001
-        log.debug("Écriture de lockdiag.log impossible", exc_info=True)
+        log.debug("Unable to write lockdiag.log", exc_info=True)
 
 
 def report_async(path: Path) -> None:

@@ -67,7 +67,7 @@ def parse_chain(symbol: str, raw: dict, fetched_at: datetime) -> ChainSnapshot:
     for o in data.get("options", []):
         parsed = parse_occ(o["option"])
         if parsed is None:
-            log.warning("Symbole OCC non reconnu: %s", o["option"])
+            log.warning("Unrecognized OCC symbol: %s", o["option"])
             continue
         exp, cp, strike = parsed
         rows.append(

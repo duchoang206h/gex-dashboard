@@ -35,7 +35,7 @@ def test_sans_historique(tmp_path, monkeypatch):
     message clair, pas d'exception."""
     monkeypatch.setattr(SETTINGS, "data_dir", tmp_path)
     out = mcp_server.get_market_context("SPX")
-    assert "Aucun" in out
+    assert "No history" in out
 
 
 def test_murs_les_plus_proches_pas_les_plus_gros(tmp_path, monkeypatch):

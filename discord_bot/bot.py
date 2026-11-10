@@ -64,7 +64,7 @@ log = logging.getLogger("gex-bot")
 PARIS = ZoneInfo("Europe/Paris")
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
 CHANNEL_ID = int(os.environ.get("DISCORD_CHANNEL_ID", "0"))
-DASHBOARD = os.environ.get("DASHBOARD_URL", "http://127.0.0.1:8050").rstrip("/")
+DASHBOARD = os.environ.get("DASHBOARD_URL", "http://127.0.0.1:9050").rstrip("/")
 
 # Heures Paris des posts fixes (h, min). Modifiable sans toucher au reste.
 # 15h15 = préparation de l'open (9h15 ET), 15h30 = open US (9h30 ET) ;
@@ -156,28 +156,28 @@ POLL_POST = (23, 5)                            # heure de post du sondage (Lun-V
 # Ajouter/retirer une question = éditer ceci (+ la colonne côté journal). Les
 # clés de colonne doivent matcher journal.POLL_COUNT_COLS.
 POLL_QUESTIONS = (
-    ("1. La journée a-t-elle été directionnelle ?", [
-        ("😰", "q1_directionnel", "Oui, pas de retour"),
-        ("🧘", "q1_retracement", "Non, on a eu des retracements (même petits)")]),
-    ("2. L'ouverture a été :", [
-        ("📈", "q2_haussier", "Haussière"),
-        ("📉", "q2_baissier", "Baissière"),
-        ("➡️", "q2_neutre", "Sans direction franche")]),
-    ("3. Y a-t-il eu une phase directionnelle ?", [
-        ("✅", "q3_dir_oui", "Oui"),
-        ("❌", "q3_dir_non", "Non")]),
-    ("4. Si oui, à partir de quand ?", [
-        ("🌅", "q4_avant_1615", "Avant 16h15"),
-        ("🌆", "q4_apres_1615", "Après 16h15")]),
-    ("5. Ampleur du mouvement ? *(NQ pts / ES pts)*", [
+    ("1. Was the day directional?", [
+        ("😰", "q1_directionnel", "Yes, no retracement"),
+        ("🧘", "q1_retracement", "No, we had retracements (even small ones)")]),
+    ("2. The open was:", [
+        ("📈", "q2_haussier", "Bullish"),
+        ("📉", "q2_baissier", "Bearish"),
+        ("➡️", "q2_neutre", "No clear direction")]),
+    ("3. Was there a directional phase?", [
+        ("✅", "q3_dir_oui", "Yes"),
+        ("❌", "q3_dir_non", "No")]),
+    ("4. If yes, starting when?", [
+        ("🌅", "q4_avant_1615", "Before 16:15"),
+        ("🌆", "q4_apres_1615", "After 16:15")]),
+    ("5. Size of the move? *(NQ pts / ES pts)*", [
         ("1️⃣", "q5_b1", "100-200 / 25-50"),
         ("2️⃣", "q5_b2", "200-400 / 50-100"),
         ("3️⃣", "q5_b3", "400-600 / 100-150"),
         ("4️⃣", "q5_b4", "600+ / 150+")]),
-    ("6. Le régime affiché t'a semblé…", [
-        ("🎯", "q6_repr_high", "Très représentatif"),
-        ("😐", "q6_repr_mid", "Moyen"),
-        ("🤷", "q6_repr_low", "Peu représentatif")]),
+    ("6. The displayed regime seemed…", [
+        ("🎯", "q6_repr_high", "Very representative"),
+        ("😐", "q6_repr_mid", "Moderate"),
+        ("🤷", "q6_repr_low", "Not very representative")]),
 )
 # Réaction -> colonne (dérivé ; l'ordre = ordre d'amorçage des réactions).
 POLL_EMOJIS = {emoji: col for _, opts in POLL_QUESTIONS for emoji, col, _ in opts}
@@ -224,9 +224,9 @@ def _journal():
     if _JC is None:
         try:
             _JC = journal.connect(JOURNAL_DB)
-            log.info("Journal de recherche ouvert : %s", JOURNAL_DB)
+            log.info("Research journal opened: %s", JOURNAL_DB)
         except Exception:  # noqa: BLE001
-            log.exception("Journal indisponible (%s) — collecte désactivée", JOURNAL_DB)
+            log.exception("Journal unavailable (%s) — collection disabled", JOURNAL_DB)
             return None
     return _JC
 
@@ -238,7 +238,7 @@ def fetch(path: str) -> dict | None:
             return None
         return r.json()
     except requests.RequestException as exc:
-        log.warning("Dashboard injoignable (%s) : %s", path, exc)
+        log.warning("Dashboard unreachable (%s): %s", path, exc)
         return None
 
 
@@ -259,7 +259,7 @@ def _snapshot_niveaux(jour: str, ts: str) -> None:
     jc = _journal()
     lv = fetch("/api/v1/NQ/levels")
     if jc is None or not lv:
-        log.warning("Photo des niveaux 15h15 : dashboard ou journal indisponible")
+        log.warning("15:15 levels snapshot: dashboard or journal unavailable")
         return
     kl = lv.get("key_levels") or {}
     vals = {"zero_gamma": lv.get("zero_gamma"), "hvl": lv.get("hvl"),
@@ -275,7 +275,7 @@ def _snapshot_niveaux(jour: str, ts: str) -> None:
     if murs:
         journal.set_metric(jc, date=jour, symbol="NQ", name="lvl_1515_murs",
                            value_txt=json.dumps(murs), ts=ts)
-    log.info("Photo des niveaux 15h15 enregistrée (%d niveaux, %d murs)",
+    log.info("15:15 levels snapshot saved (%d levels, %d walls)",
              sum(v is not None for v in vals.values()), len(murs))
 
 
@@ -289,7 +289,7 @@ bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 async def _post(d: dict) -> None:
     channel = bot.get_channel(CHANNEL_ID)
     if channel is None:
-        log.warning("Salon %s introuvable — le bot est-il invité et l'ID correct ?",
+        log.warning("Channel %s not found — is the bot invited and the ID correct?",
                     CHANNEL_ID)
         return
     await channel.send(embed=_embed(d))
@@ -308,12 +308,12 @@ def _lire_brief(nom: str) -> str | None:
         age = time.time() - f.stat().st_mtime
         max_age = BRIEF_MAX_AGE_PAR_NOM.get(nom, BRIEF_MAX_AGE_S)
         if age > max_age:
-            log.info("Brief %s ignoré : %.0f min (> %.0f)", nom, age / 60,
+            log.info("Brief %s ignored: %.0f min (> %.0f)", nom, age / 60,
                      max_age / 60)
             return None
         return f.read_text(encoding="utf-8").strip() or None
     except Exception:  # noqa: BLE001 — un brief illisible ne doit rien casser
-        log.exception("Lecture du brief %s", nom)
+        log.exception("Reading brief %s", nom)
         return None
 
 
@@ -356,7 +356,7 @@ async def _post_brief(nom: str, jour: str) -> bool:
     if channel is None:
         return False
     n = await _envoyer_brief(channel, texte)
-    log.info("Brief %s posté (%d message(s), %d caractères)", nom, n, len(texte))
+    log.info("Brief %s posted (%d message(s), %d characters)", nom, n, len(texte))
     return True
 
 
@@ -372,8 +372,8 @@ async def _poster_brief_sur_demande(ctx: commands.Context, nom: str) -> None:
     """
     texte = _lire_brief(nom)
     if not texte:
-        await ctx.send(f"Pas de brief « {nom} » disponible ou trop ancien "
-                       f"(> {BRIEF_MAX_AGE_S // 60} min) — régénère-le d'abord.")
+        await ctx.send(f"No brief « {nom} » available or too old "
+                       f"(> {BRIEF_MAX_AGE_S // 60} min) — regenerate it first.")
         return
     await _envoyer_brief(ctx, texte)
 
@@ -457,14 +457,14 @@ async def _capture_heatmaps(date: str, slot_label: str, now) -> None:
                                path=str(path), ts=now.isoformat())
         got += 1
     if got:
-        log.info("Heatmaps %s : %d image(s) (%s)", slot_label, got, date)
+        log.info("Heatmaps %s: %d image(s) (%s)", slot_label, got, date)
 
 
 def _poll_embed(now) -> discord.Embed:
     e = discord.Embed(
-        title=f"🗳️ Sondage de séance — {now.strftime('%d/%m/%Y')}",
-        description="Un clic par question. Dépouillé demain à 12h — vos réponses "
-                    "nourrissent la base d'étude.",
+        title=f"🗳️ Session poll — {now.strftime('%d/%m/%Y')}",
+        description="One click per question. Tallied tomorrow at 12:00 — your answers "
+                    "feed the research database.",
         color=0x3498DB)
     for titre, opts in POLL_QUESTIONS:
         e.add_field(name=titre,
@@ -487,7 +487,7 @@ async def _post_poll(now) -> None:
     tally_due = dt.datetime.combine((now + dt.timedelta(days=1)).date(), dt.time(12, 0), PARIS)
     journal.poll_open(jc, date=now.date().isoformat(), message_id=str(msg.id),
                       posted_ts=now.isoformat(), tally_due_ts=tally_due.isoformat())
-    log.info("Sondage posté (%s), dépouillement prévu %s", now.date().isoformat(), tally_due)
+    log.info("Poll posted (%s), tally scheduled for %s", now.date().isoformat(), tally_due)
 
 
 async def _tally_due_polls(now) -> None:
@@ -501,7 +501,7 @@ async def _tally_due_polls(now) -> None:
         try:
             msg = await channel.fetch_message(int(row["message_id"]))
         except (discord.NotFound, discord.HTTPException):
-            log.warning("Sondage %s introuvable au dépouillement", row["message_id"])
+            log.warning("Poll %s not found at tally time", row["message_id"])
             continue
         counts = {}
         for reaction in msg.reactions:
@@ -509,7 +509,7 @@ async def _tally_due_polls(now) -> None:
             if col:
                 counts[col] = max(0, reaction.count - 1)   # -1 : l'amorce du bot
         journal.poll_tally(jc, date=row["date"], counts=counts, tallied_ts=now.isoformat())
-        log.info("Sondage %s dépouillé : %s", row["date"], counts)
+        log.info("Poll %s tallied: %s", row["date"], counts)
         _build_daily_metrics(row["date"])
 
 
@@ -563,7 +563,7 @@ def _build_daily_metrics(date: str) -> None:
         if av or ap:                      # heure de la phase directionnelle
             journal.set_metric(jc, date=date, name="poll_phase_heure",
                                value_txt="avant_1615" if av >= ap else "apres_1615")
-    log.info("daily_metrics construites (%s)", date)
+    log.info("daily_metrics built (%s)", date)
 
 
 async def _journal_tick(now, d) -> None:
@@ -600,7 +600,7 @@ async def tick() -> None:
     try:
         await _journal_tick(now, d)
     except Exception:  # noqa: BLE001
-        log.exception("Collecte journal : échec (sans conséquence sur le bot)")
+        log.exception("Journal collection failed (no impact on the bot)")
 
     # Posts Discord automatiques : silencieux le week-end, « muet » ne valant
     # que pour l'automatique — les commandes à la demande restent actives.
@@ -614,25 +614,25 @@ async def tick() -> None:
     if slot == CLOSE_POST and slot not in deja:      # message de clôture (16h)
         deja.add(slot)
         await _post_close(d)
-        log.info("Message de clôture posté (%02dh%02d)", slot[0], slot[1])
+        log.info("Close message posted (%02dh%02d)", slot[0], slot[1])
         _last_signature, _last_digest = signature, d
         return
     if slot in SCHEDULE and slot not in deja:
         deja.add(slot)
         await _post(d)
-        log.info("Post fixe %02dh%02d (%s)", slot[0], slot[1], d["color"])
+        log.info("Scheduled post %02dh%02d (%s)", slot[0], slot[1], d["color"])
         if slot == NIVEAUX_SLOT:
             try:
                 _snapshot_niveaux(jour, now.isoformat())
             except Exception:  # noqa: BLE001 — la photo est un bonus, jamais bloquante
-                log.exception("Photo des niveaux 15h15")
+                log.exception("15:15 levels snapshot")
         # Brief prémarket en complément, s'il a été rédigé et qu'il est frais.
         nom = BRIEF_SLOTS.get(slot)
         if nom:
             try:
                 await _post_brief(nom, jour)
             except Exception:  # noqa: BLE001 — le digest prime, le brief est un bonus
-                log.exception("Post du brief %s", nom)
+                log.exception("Posting brief %s", nom)
         _last_signature, _last_digest = signature, d
         return
 
@@ -642,10 +642,10 @@ async def tick() -> None:
         if debut <= now.time() <= fin:
             try:
                 if await _post_brief(nom, jour):
-                    log.info("Brief %s posté en rattrapage (%02dh%02d)", nom,
+                    log.info("Brief %s posted as catch-up (%02dh%02d)", nom,
                              now.hour, now.minute)
             except Exception:  # noqa: BLE001
-                log.exception("Rattrapage du brief %s", nom)
+                log.exception("Catching up on brief %s", nom)
 
     # Changement de régime : uniquement en session, et seulement après un
     # premier relevé (sinon le tout premier tick posterait sans raison).
@@ -655,12 +655,12 @@ async def tick() -> None:
         change_couleur = d.get("color") != (_last_digest or {}).get("color")
         if POST_CHANGEMENT_REGIME and (_alert_full or change_couleur):
             await _post(d)
-            log.info("Changement de régime détecté -> post (%s, mode %s)",
-                     d["color"], "complet" if _alert_full else "allégé")
+            log.info("Regime change detected -> post (%s, mode %s)",
+                     d["color"], "full" if _alert_full else "lightweight")
         else:
-            log.info("Changement de régime (%s%s) — post Discord %s", d["color"],
-                     ", couleur inchangée" if not change_couleur else "",
-                     "omis (mode allégé)" if POST_CHANGEMENT_REGIME else "désactivé")
+            log.info("Regime change (%s%s) — Discord post %s", d["color"],
+                     ", color unchanged" if not change_couleur else "",
+                     "omitted (lightweight mode)" if POST_CHANGEMENT_REGIME else "disabled")
         reason = journal.compute_reason(_prev_for_reason(), d.get("color"),
                                         d.get("confidence"), d.get("families"))
         await _record_regime(now, "change", d, reason=reason)
@@ -672,7 +672,7 @@ async def etat(ctx: commands.Context) -> None:
     """`!etat` — le digest complet, à la demande."""
     d = fetch("/api/v1/digest")
     if d is None:
-        await ctx.send("Dashboard injoignable pour l'instant.")
+        await ctx.send("Dashboard unreachable right now.")
         return
     await ctx.send(embed=_embed(d))
 
@@ -705,7 +705,7 @@ async def ajustement2_cmd(ctx: commands.Context) -> None:
 async def brief_cmd(ctx: commands.Context, nom: str | None = None) -> None:
     """`!brief <nom>` — alias générique de !matin/!prebrief/!ajustement/!ajustement2."""
     if nom is None or nom.lower() not in _BRIEF_NOMS:
-        await ctx.send(f"Précise un nom : {', '.join(_BRIEF_NOMS)}.")
+        await ctx.send(f"Specify a name: {', '.join(_BRIEF_NOMS)}.")
         return
     await _poster_brief_sur_demande(ctx, nom.lower())
 
@@ -715,13 +715,13 @@ async def vix_cmd(ctx: commands.Context) -> None:
     """`!vix` — la volatilité (VIX) et sa position vs le seuil du digest."""
     d = fetch("/api/v1/vix")
     if not d or not d.get("available"):
-        await ctx.send("VIX indisponible pour l'instant.")
+        await ctx.send("VIX unavailable right now.")
         return
     seuil = d.get("seuil", 0)
     g = d.get("grade") or {}
     grade = f"{g.get('emoji', '')} {g.get('label', '?')}".strip()
-    pos = "au-dessus" if d.get("above") else "sous"
-    await ctx.send(f"**VIX {d['vix']:.2f}** — {grade} · {pos} le seuil ({seuil:.0f}).")
+    pos = "above" if d.get("above") else "below"
+    await ctx.send(f"**VIX {d['vix']:.2f}** — {grade} · {pos} the threshold ({seuil:.0f}).")
 
 
 @bot.command(name="gamma")
@@ -732,7 +732,7 @@ async def gamma(ctx: commands.Context, symbole: str | None = None) -> None:
         return
     s = fetch(f"/api/v1/{symbole.upper()}/summary")
     if s is None:
-        await ctx.send(f"Pas de données pour {symbole.upper()} (pull pas encore fait ?).")
+        await ctx.send(f"No data for {symbole.upper()} (pull not done yet?).")
         return
     zg = f"{s['zero_gamma']:.0f}" if s.get("zero_gamma") is not None else "n/a"
     await ctx.send(
@@ -752,8 +752,8 @@ async def niveaux(ctx: commands.Context, symbole: str | None = None,
     """`!niveaux NQ` — niveaux GEX en texte. `!niveaux NDX NQ` — niveaux NDX
     TRANSPOSÉS en prix NQ (comme le sélecteur d'échelle du dashboard)."""
     if not symbole:
-        await ctx.send("Usage : `!niveaux SYMBOLE [ÉCHELLE]` "
-                       "(ex. `!niveaux NQ`, ou `!niveaux NDX NQ` pour transposer).")
+        await ctx.send("Usage: `!niveaux SYMBOL [SCALE]` "
+                       "(e.g. `!niveaux NQ`, or `!niveaux NDX NQ` to transpose).")
         return
     sym = symbole.upper()
     path = f"/api/v1/{sym}/levels"
@@ -761,7 +761,7 @@ async def niveaux(ctx: commands.Context, symbole: str | None = None,
         path += f"?scale={echelle.upper()}"
     d = fetch(path)
     if d is None:
-        await ctx.send(f"Pas de niveaux pour {sym} (pull pas encore fait ?).")
+        await ctx.send(f"No levels for {sym} (pull not done yet?).")
         return
     k = d.get("key_levels", {})
     murs = " · ".join(
@@ -769,17 +769,17 @@ async def niveaux(ctx: commands.Context, symbole: str | None = None,
         f"{'call' if w['gex'] > 0 else 'put'})"
         for w in d.get("gex_walls", [])
     ) or "n/a"
-    titre = f"**{sym}** — niveaux GEX"
+    titre = f"**{sym}** — GEX levels"
     sc = d.get("scale")
     if sc and sc != sym:
-        titre += f" (échelle {sc})"
+        titre += f" (scale {sc})"
     titre += f" · spot {_fmt(d.get('spot'))}"
     lignes = [
         titre,
         f"Gamma Flip {_fmt(d.get('zero_gamma'))} · HVL {_fmt(d.get('hvl'))}",
         f"Call Wall {_fmt(k.get('call_wall'))} · Put Support {_fmt(k.get('put_support'))}",
-        f"1D min/max : {_fmt(k.get('d1_min'))} – {_fmt(k.get('d1_max'))}",
-        f"Murs GEX : {murs}",
+        f"1D min/max: {_fmt(k.get('d1_min'))} – {_fmt(k.get('d1_max'))}",
+        f"GEX walls: {murs}",
     ]
     await ctx.send("\n".join(lignes))
 
@@ -788,17 +788,17 @@ async def niveaux(ctx: commands.Context, symbole: str | None = None,
 # graphique côté API, légende affichée). N'importe quel graphe du dashboard
 # peut sortir en PNG (cf. /api/v1/<sym>/chart/<name>.png).
 CHARTS = {
-    "heatmap": ("heatmap", "Heatmap — gamma par strike + parcours du prix"),
-    "gex": ("gex", "Gamma Exposure par strike"),
-    "delta": ("dex", "Delta Exposure par strike"),
-    "dex": ("dex", "Delta Exposure par strike"),
-    "flow": ("tape", "Order flow signé cumulé"),
-    "skew": ("smile", "Skew IV par échéance"),
-    "profile": ("profile", "Profil de GEX selon le spot"),
-    "vanna": ("vanna", "Vanna Exposure par strike"),
-    "charm": ("charm", "Charm Exposure par strike"),
-    "history": ("history", "GEX net — historique"),
-    "positionnement": ("oi", "Variation d'open interest vs veille"),
+    "heatmap": ("heatmap", "Heatmap — gamma by strike + price path"),
+    "gex": ("gex", "Gamma Exposure by strike"),
+    "delta": ("dex", "Delta Exposure by strike"),
+    "dex": ("dex", "Delta Exposure by strike"),
+    "flow": ("tape", "Cumulative signed order flow"),
+    "skew": ("smile", "IV skew by expiry"),
+    "profile": ("profile", "GEX profile by spot"),
+    "vanna": ("vanna", "Vanna Exposure by strike"),
+    "charm": ("charm", "Charm Exposure by strike"),
+    "history": ("history", "Net GEX — history"),
+    "positionnement": ("oi", "Open interest change vs previous day"),
 }
 
 
@@ -810,28 +810,28 @@ _SCALES = {"SPX", "NDX", "SPY", "QQQ", "ES", "NQ"}
 
 # Vannes tirées au sort quand une COMMANDE n'existe pas (`{cmd}` = son nom).
 _UNKNOWN_QUIPS = (
-    "🤷 `!{cmd}` ? Jamais entendu parler. Tape `!help` pour les vraies.",
-    "🎲 `!{cmd}` : c'est pas dans mon deck. `!help` ?",
-    "🧐 `!{cmd}`… tu inventes des commandes maintenant ? `!help`.",
-    "🙃 `!{cmd}` n'existe pas, mais l'effort est noté. `!help`.",
-    "📡 `!{cmd}` : aucune réponse de la station. Essaie `!help`.",
-    "🤨 `!{cmd}` ? Tente `!help`, tu seras peut-être surpris.",
-    "🛎️ `!{cmd}` : y'a personne à ce guichet. `!help`.",
-    "🕵️ `!{cmd}` introuvable au dossier. `!help` pour la liste.",
+    "🤷 `!{cmd}`? Never heard of it. Type `!help` for the real ones.",
+    "🎲 `!{cmd}`: not in my deck. `!help`?",
+    "🧐 `!{cmd}`… inventing commands now? `!help`.",
+    "🙃 `!{cmd}` doesn't exist, but the effort is noted. `!help`.",
+    "📡 `!{cmd}`: no response from the station. Try `!help`.",
+    "🤨 `!{cmd}`? Try `!help`, you might be surprised.",
+    "🛎️ `!{cmd}`: nobody at this window. `!help`.",
+    "🕵️ `!{cmd}` not found in the file. `!help` for the list.",
 )
 
 # Vannes tirées au sort quand un mot n'est pas reconnu (`{toks}` = les tokens).
 _IGNORE_QUIPS = (
-    "🤨 {toks} ? C'est un grec que je connais pas, celui-là. Ignoré.",
-    "🧐 {toks} : ni échéance, ni %, ni symbole. J'ai fait semblant de rien.",
-    "🥸 J'ai zappé {toks} — pas dans mon vocabulaire d'options.",
-    "🙈 {toks} m'a filé entre les doigts.",
-    "🃏 {toks} ? Poliment ignoré, sans rancune.",
-    "😎 {toks} n'a pas passé le contrôle qualité. Dehors.",
-    "🫡 {toks} : ignoré avec le sourire.",
-    "🧹 J'ai balayé {toks} sous le tapis (pas compris).",
-    "🛸 {toks} vient d'une autre galaxie, je l'ai laissé repartir.",
-    "🎣 {toks} ? Rien mordu, je relâche.",
+    "🤨 {toks}? That's Greek to me. Ignored.",
+    "🧐 {toks}: not an expiry, a %, or a symbol. I pretended not to notice.",
+    "🥸 I skipped {toks} — not in my options vocabulary.",
+    "🙈 {toks} slipped through my fingers.",
+    "🃏 {toks}? Politely ignored, no hard feelings.",
+    "😎 {toks} failed quality control. Out.",
+    "🫡 {toks}: ignored with a smile.",
+    "🧹 I swept {toks} under the rug (didn't understand it).",
+    "🛸 {toks} came from another galaxy, I let it go.",
+    "🎣 {toks}? Nothing bit, I'm releasing it.",
 )
 
 
@@ -857,7 +857,7 @@ def _parse_chart_opts(args: tuple[str, ...]) -> tuple[dict, str, list[str]]:
             pass
         if tok.upper() in _SCALES:
             params["scale"] = tok.upper()
-            bits.append(f"échelle {params['scale']}")
+            bits.append(f"scale {params['scale']}")
         else:
             unknown.append(tok)
     return params, " · ".join(bits), unknown
@@ -873,17 +873,17 @@ async def _send_chart(ctx: commands.Context, symbole: str, chart: str, legende: 
     if unknown:
         toks = ", ".join(f"`{u}`" for u in unknown)
         quip = random.choice(_IGNORE_QUIPS).format(toks=toks)
-        await ctx.send(f"{quip}\n-# Valides : échéance (0dte/semaine/mois/tout) · "
-                       f"concentration ±% · échelle (SPX/NDX/SPY/QQQ/ES/NQ).")
+        await ctx.send(f"{quip}\n-# Valid: expiry (0dte/semaine/mois/tout) · "
+                       f"concentration ±% · scale (SPX/NDX/SPY/QQQ/ES/NQ).")
     try:
         r = requests.get(f"{DASHBOARD}/api/v1/{sym}/chart/{chart}.png",
                          params=params, timeout=45)
     except requests.RequestException:
-        await ctx.send("Dashboard injoignable pour l'instant.")
+        await ctx.send("Dashboard unreachable right now.")
         return
     if r.status_code != 200 or r.content[:4] != b"\x89PNG":
-        await ctx.send(f"🃏 **{sym}** ? Soit c'est pas un symbole que je suis, soit "
-                       f"le pull n'est pas encore fait. (Essaie SPX, NDX, NQ, ES, "
+        await ctx.send(f"🃏 **{sym}**? Either it's not a symbol I follow, or "
+                       f"the pull hasn't happened yet. (Try SPX, NDX, NQ, ES, "
                        f"SPY, QQQ…)")
         return
     leg = f"{legende} — {suffixe}" if suffixe else legende
@@ -898,8 +898,8 @@ async def graph(ctx: commands.Context, symbole: str | None = None,
     concentration (±%) et échelle (ex. NQ) optionnelles, dans tout ordre."""
     if not symbole or not nom or nom.lower() not in CHARTS:
         dispo = ", ".join(sorted(CHARTS))
-        await ctx.send(f"Usage : `!graph SYMBOLE NOM [ÉCHÉANCE] [±%] [ÉCHELLE]`. "
-                       f"Graphiques : {dispo}.")
+        await ctx.send(f"Usage: `!graph SYMBOL NAME [EXPIRY] [±%] [SCALE]`. "
+                       f"Charts: {dispo}.")
         return
     chart, legende = CHARTS[nom.lower()]
     await _send_chart(ctx, symbole, chart, legende, *args)
@@ -909,8 +909,8 @@ def _make_chart_command(cmd_name: str, chart: str, legende: str):
     @bot.command(name=cmd_name)
     async def _cmd(ctx: commands.Context, symbole: str | None = None, *args: str):
         if not symbole:
-            await ctx.send(f"Usage : `!{cmd_name} SYMBOLE [ÉCHÉANCE] [±%] [ÉCHELLE]` "
-                           f"(ex. `!{cmd_name} NQ 0dte 2`, ou `!{cmd_name} NDX NQ`).")
+            await ctx.send(f"Usage: `!{cmd_name} SYMBOL [EXPIRY] [±%] [SCALE]` "
+                           f"(e.g. `!{cmd_name} NQ 0dte 2`, or `!{cmd_name} NDX NQ`).")
             return
         await _send_chart(ctx, symbole, chart, legende, *args)
     return _cmd
@@ -926,13 +926,13 @@ async def alert_full_cmd(ctx: commands.Context, etat: str | None = None) -> None
     """`!alert_full on|off` — verbosite des alertes de changement de regime."""
     global _alert_full
     if etat is None:
-        mode = "complet" if _alert_full else "allégé"
+        mode = "full" if _alert_full else "lightweight"
         await ctx.send(embed=discord.Embed(
-            description=(f"Alertes en mode **{mode}**." "\n"
-                         "`!alert_full on` — un message à chaque changement "
-                         "d'état d'un symbole." "\n"
-                         "`!alert_full off` — un message uniquement quand la "
-                         "lecture globale change de couleur (défaut)."),
+            description=(f"Alerts in **{mode}** mode." "\n"
+                         "`!alert_full on` — one message on every state "
+                         "change for a symbol." "\n"
+                         "`!alert_full off` — one message only when the "
+                         "overall read changes color (default)."),
             color=0x3498DB))
         return
     val = etat.strip().lower()
@@ -942,17 +942,17 @@ async def alert_full_cmd(ctx: commands.Context, etat: str | None = None) -> None
         _alert_full = False
     else:
         await ctx.send(embed=discord.Embed(
-            description=f"« {etat} » ? C'est `on` ou `off`, pas un troisième "
-                        "état quantique. 🐈",
+            description=f"« {etat} »? It's `on` or `off`, not a third "
+                        "quantum state. 🐈",
             color=0xE67E22))
         return
     _save_settings(alert_full=_alert_full)
     if _alert_full:
-        txt = ("Alertes en mode **complet** : un message à chaque changement "
-               "d'état d'un symbole (verbeux).")
+        txt = ("Alerts in **full** mode: one message on every state change "
+               "for a symbol (verbose).")
     else:
-        txt = ("Alertes en mode **allégé** : un message uniquement quand la "
-               "lecture globale change de couleur (vert/orange/rouge).")
+        txt = ("Alerts in **lightweight** mode: one message only when the "
+               "overall read changes color (green/orange/red).")
     await ctx.send(embed=discord.Embed(description=txt, color=0x2ECC71))
 
 
@@ -961,7 +961,7 @@ async def cloture(ctx: commands.Context) -> None:
     """`!cloture` — poste le message de clôture à la demande (sinon auto à 16h)."""
     d = fetch("/api/v1/digest")
     if not d or not d.get("close_message"):
-        await ctx.send("Message de clôture indisponible (dashboard pas prêt ?).")
+        await ctx.send("Close message unavailable (dashboard not ready?).")
         return
     await ctx.send(embed=discord.Embed(description=d["close_message"], color=0xE74C3C))
 
@@ -981,31 +981,31 @@ async def pin_cmd(ctx: commands.Context, symbole: str | None = None,
     """`!pin QQQ` (ou `!pin SPX 2026-08-01`) — pinning de clôture : le prix
     s'est-il collé sur un strike / un mur GEX à 22h ? Pertinent après la clôture."""
     if not symbole:
-        await ctx.send("Usage : `!pin QQQ` (ou `!pin SPX 2026-08-01`). "
-                       "Le plus parlant après 22h.")
+        await ctx.send("Usage: `!pin QQQ` (or `!pin SPX 2026-08-01`). "
+                       "Most meaningful after 22:00.")
         return
     sym = symbole.upper()
     path = f"/api/v1/{sym}/close_context" + (f"?date={date}" if date else "")
     d = fetch(path)
     if not d or not d.get("available"):
-        raison = (d or {}).get("reason", "dashboard injoignable")
-        await ctx.send(f"Pinning indisponible pour {sym} ({raison}).")
+        raison = (d or {}).get("reason", "dashboard unreachable")
+        await ctx.send(f"Pinning unavailable for {sym} ({raison}).")
         return
     pr = d.get("pin_ratio")
-    jauge = ("collé au strike" if pr is not None and pr < 0.15 else
-             "proche d'un strike" if pr is not None and pr < 0.4 else
-             "entre deux strikes")
+    jauge = ("pinned to the strike" if pr is not None and pr < 0.15 else
+             "near a strike" if pr is not None and pr < 0.4 else
+             "between two strikes")
     lignes = [
-        f"**{sym}** — pinning de clôture ({d.get('date')})",
-        f"Clôture {d.get('close')} · strike le plus proche "
-        f"{d.get('nearest_strike')} (écart {d.get('dist_nearest_strike')})",
+        f"**{sym}** — close pinning ({d.get('date')})",
+        f"Close {d.get('close')} · nearest strike "
+        f"{d.get('nearest_strike')} (distance {d.get('dist_nearest_strike')})",
         f"pin_ratio {pr} → **{jauge}**" if pr is not None else "pin_ratio n/a",
-        f"Mur GEX1 {d.get('gex1_strike')} (écart {d.get('dist_gex1')}) · "
-        f"GEX2 {d.get('gex2_strike')} (écart {d.get('dist_gex2')})",
+        f"GEX1 wall {d.get('gex1_strike')} (distance {d.get('dist_gex1')}) · "
+        f"GEX2 {d.get('gex2_strike')} (distance {d.get('dist_gex2')})",
     ]
     cr = d.get("strike_crossings_preclose")
     if cr is not None:
-        lignes.append(f"Franchissements de strike (15h50-16h) : {cr}")
+        lignes.append(f"Strike crossings (15:50-16:00): {cr}")
     await ctx.send("\n".join(lignes))
 
 
@@ -1015,25 +1015,25 @@ async def tick_cmd(ctx: commands.Context, symbole: str | None = None,
     """`!tick NQ` (ou `!tick ES 2026-08-01`) — fenêtre de clôture au tick
     (21h45-22h05) : range avant/après 22h, expansion, excursions."""
     if not symbole:
-        await ctx.send("Usage : `!tick NQ` (ou `!tick ES 2026-08-01`). "
-                       "Capture 21h45-22h05, compte courtier requis.")
+        await ctx.send("Usage: `!tick NQ` (or `!tick ES 2026-08-01`). "
+                       "Capture 21:45-22:05, broker account required.")
         return
     sym = symbole.upper()
     path = f"/api/v1/{sym}/tick_context" + (f"?date={date}" if date else "")
     d = fetch(path)
     if not d or not d.get("available"):
-        raison = (d or {}).get("reason", "dashboard injoignable")
-        await ctx.send(f"Ticks indisponibles pour {sym} ({raison}).")
+        raison = (d or {}).get("reason", "dashboard unreachable")
+        await ctx.send(f"Ticks unavailable for {sym} ({raison}).")
         return
     lignes = [
-        f"**{sym}** — fenêtre de clôture ({d.get('date')}) · {d.get('n_ticks')} ticks",
-        f"Range {d.get('range')} (haut {d.get('high')} / bas {d.get('low')})",
+        f"**{sym}** — close window ({d.get('date')}) · {d.get('n_ticks')} ticks",
+        f"Range {d.get('range')} (high {d.get('high')} / low {d.get('low')})",
     ]
     if d.get("post_range") is not None:
         exp = f" (×{d.get('post_expansion')})" if d.get("post_expansion") else ""
-        lignes.append(f"Avant 22h : range {d.get('pre_range')} · après : "
+        lignes.append(f"Before 22:00: range {d.get('pre_range')} · after: "
                       f"range {d.get('post_range')}{exp}")
-        lignes.append(f"Excursion post-clôture depuis {d.get('close_2200')} : "
+        lignes.append(f"Post-close excursion from {d.get('close_2200')}: "
                       f"+{d.get('post_max_up')} / −{d.get('post_max_down')}")
     await ctx.send("\n".join(lignes))
 
@@ -1046,18 +1046,18 @@ async def setup_cmd(ctx: commands.Context, *, valeur: str | None = None) -> None
     marché. Unique par jour, corrigible (ré-écrire remplace)."""
     jc = _journal()
     if jc is None:
-        await ctx.send("Journal indisponible.")
+        await ctx.send("Journal unavailable.")
         return
     today = dt.datetime.now(PARIS).date().isoformat()
     if not valeur:
         actuel = journal.get_setup(jc, today)
-        await ctx.send(f"Usage : `!setup MOC A` ou `!setup NONE`. "
-                       f"Setup du jour : **{actuel or '—'}**.")
+        await ctx.send(f"Usage: `!setup MOC A` or `!setup NONE`. "
+                       f"Today's setup: **{actuel or '—'}**.")
         return
     now = dt.datetime.now(PARIS)
     v = valeur.strip().upper()
     journal.set_setup(jc, date=today, value=v, ts=now.isoformat())
-    await ctx.send(f"✅ Setup du {now:%d/%m} enregistré : **{v}**.")
+    await ctx.send(f"✅ Setup for {now:%d/%m} saved: **{v}**.")
 
 
 def _split_linked_date(texte: str) -> tuple[str | None, str]:
@@ -1070,25 +1070,25 @@ async def _add_log(ctx, texte: str | None, type_: str) -> None:
     """Cœur commun de `!note` et `!hypo` : liste si vide, sinon consigne."""
     jc = _journal()
     if jc is None:
-        await ctx.send("Journal indisponible.")
+        await ctx.send("Journal unavailable.")
         return
     if not texte:
         rows = journal.list_entries(jc)[:10]
         if not rows:
-            await ctx.send("Journal vide. `!note <texte>` ou `!hypo <hypothèse>` "
-                           "pour commencer.")
+            await ctx.send("Journal empty. `!note <text>` or `!hypo <hypothesis>` "
+                           "to get started.")
             return
         lignes = [f"#{r['id']} [{r['type']}/{r['status']}] {r['text']} "
                   f"— *{r['author']}*" for r in rows]
-        await ctx.send("**Journal de recherche :**\n" + "\n".join(lignes))
+        await ctx.send("**Research journal:**\n" + "\n".join(lignes))
         return
     linked, texte = _split_linked_date(texte)
     now = dt.datetime.now(PARIS)
     nid = journal.add_entry(jc, text=texte, created=now.isoformat(), type=type_,
                             author=ctx.author.display_name,
                             linked_date=linked or now.date().isoformat())
-    quand = f" (séance {linked})" if linked else ""
-    await ctx.send(f"📝 #{nid} [{type_}]{quand} : « {texte} » — *{ctx.author.display_name}*")
+    quand = f" (session {linked})" if linked else ""
+    await ctx.send(f"📝 #{nid} [{type_}]{quand}: « {texte} » — *{ctx.author.display_name}*")
 
 
 @bot.command(name="note")
@@ -1110,83 +1110,83 @@ async def aide(ctx: commands.Context) -> None:
     """`!help` — la liste des commandes, regroupées par thème."""
     graphes = ", ".join(f"`!{n}`" for n in sorted(CHARTS))
     e = discord.Embed(
-        title="Commandes du bot — état du gamma",
-        description="Le bot relaie le **verdict** calculé par le dashboard GEX "
-                    "(analyses dérivées, jamais la donnée brute).",
+        title="Bot commands — gamma status",
+        description="The bot relays the **verdict** computed by the GEX dashboard "
+                    "(derived analytics, never raw data).",
         color=0x3498DB,
     )
     e.add_field(
-        name="📊 État & verdict",
-        value=("`!etat` — le digest complet (état par symbole, verdict "
-               "couleur, confiance).\n"
-               "`!gamma` — idem `!etat`.\n"
-               "`!gamma NQ` — les valeurs calculées d'un symbole (GEX net, "
-               "DEX net, Zero Gamma).\n"
-               "`!vix` — la volatilité (VIX), son régime (calme→panique) et sa "
-               "position vs le seuil.\n"
-               "`!cloture` — le message de clôture (auto à 16h).\n"
-               "`!alert_full on|off` — (inactif : les posts de changement de "
-               "régime sont désactivés) verbosité des alertes : *complet* "
-               "(chaque changement d'état) ou *allégé* (uniquement un "
-               "changement de couleur globale — défaut)."),
+        name="📊 Status & verdict",
+        value=("`!etat` — the full digest (status by symbol, color "
+               "verdict, confidence).\n"
+               "`!gamma` — same as `!etat`.\n"
+               "`!gamma NQ` — computed values for a symbol (net GEX, "
+               "net DEX, Zero Gamma).\n"
+               "`!vix` — volatility (VIX), its regime (calm→panic) and its "
+               "position vs the threshold.\n"
+               "`!cloture` — the close message (auto at 16:00).\n"
+               "`!alert_full on|off` — (inactive: regime-change posts "
+               "are disabled) alert verbosity: *full* "
+               "(every state change) or *lightweight* (only an "
+               "overall color change — default)."),
         inline=False,
     )
     e.add_field(
-        name="📰 Briefs prémarket (rédigés par une routine Claude)",
-        value=("`!matin`, `!prebrief`, `!ajustement`, `!ajustement2` — poste "
-               "le brief correspondant MAINTENANT, même hors de son créneau "
-               "normal (8h30, 15h15, 15h45, 15h50-16h20). `!brief <nom>` fait "
-               "la même chose avec le nom en argument.\n"
-               "Chaque brief doit avoir moins de 15 min pour être posté — "
-               "sinon le bot le dit plutôt que de relayer une version périmée."),
+        name="📰 Premarket briefs (written by a Claude routine)",
+        value=("`!matin`, `!prebrief`, `!ajustement`, `!ajustement2` — post "
+               "the matching brief NOW, even outside its normal "
+               "slot (8:30, 15:15, 15:45, 15:50-16:20). `!brief <nom>` does "
+               "the same with the name as an argument.\n"
+               "Each brief must be less than 15 min old to be posted — "
+               "otherwise the bot says so rather than relaying a stale version."),
         inline=False,
     )
     e.add_field(
-        name="🎯 Niveaux",
-        value=("`!niveaux NQ` (ou `!levels NQ`) — Gamma Flip, HVL, Call Wall, "
-               "Put Support, 1D min/max, murs GEX.\n"
-               "`!niveaux NDX NQ` — niveaux NDX **transposés en prix NQ**."),
+        name="🎯 Levels",
+        value=("`!niveaux NQ` (or `!levels NQ`) — Gamma Flip, HVL, Call Wall, "
+               "Put Support, 1D min/max, GEX walls.\n"
+               "`!niveaux NDX NQ` — NDX levels **transposed into NQ prices**."),
         inline=False,
     )
     e.add_field(
-        name="🖼️ Graphiques (image)",
-        value=(f"`!graph NQ heatmap` — n'importe quel graphique du dashboard.\n"
-               f"Raccourcis directs : {graphes}.\n"
-               f"Options (tout ordre) : **échéance** (0dte/semaine/mois/tout), "
-               f"**concentration** ±%, **échelle** (SPX/NDX/…) — ex. "
-               f"`!gex NQ 0dte 2`, `!gex NDX NQ` (NDX en prix NQ)."),
+        name="🖼️ Charts (image)",
+        value=(f"`!graph NQ heatmap` — any dashboard chart.\n"
+               f"Direct shortcuts: {graphes}.\n"
+               f"Options (any order): **expiry** (0dte/semaine/mois/tout), "
+               f"**concentration** ±%, **scale** (SPX/NDX/…) — e.g. "
+               f"`!gex NQ 0dte 2`, `!gex NDX NQ` (NDX in NQ prices)."),
         inline=False,
     )
     e.add_field(
-        name="🗳️ Sondage de séance",
-        value=("Chaque soir (23h05), un sondage à réactions sur la journée "
-               "(directionnelle ? ampleur ? régime représentatif ?). Vos votes "
-               "alimentent une base d'étude. `!sondage` le relance à la demande."),
+        name="🗳️ Session poll",
+        value=("Every evening (23:05), a reaction poll about the day "
+               "(directional? size? representative regime?). Your votes "
+               "feed a research database. `!sondage` relaunches it on demand."),
         inline=False,
     )
     e.add_field(
-        name="🔬 Recherche (journal du labo)",
-        value=("`!pin QQQ` — pinning de clôture (collé sur un strike ? mur GEX ?).\n"
-               "`!tick NQ` — fenêtre de clôture au tick (range avant/après 22h).\n"
-               "`!setup MOC A` (ou `!setup NONE`) — tag ton setup MOC du jour.\n"
-               "`!hypo <hypothèse>` — consigne une hypothèse à tester.\n"
-               "`!note <observation>` — une observation. `!note` seul liste les "
-               "dernières. Préfixe optionnel `AAAA-MM-JJ` pour viser une séance "
-               "passée ; l'auteur est capté automatiquement."),
+        name="🔬 Research (lab journal)",
+        value=("`!pin QQQ` — close pinning (pinned to a strike? GEX wall?).\n"
+               "`!tick NQ` — tick-level close window (range before/after 22:00).\n"
+               "`!setup MOC A` (or `!setup NONE`) — tag your MOC setup for the day.\n"
+               "`!hypo <hypothesis>` — log a hypothesis to test.\n"
+               "`!note <observation>` — an observation. `!note` alone lists the "
+               "latest. Optional `YYYY-MM-DD` prefix to target a past "
+               "session; the author is captured automatically."),
         inline=False,
     )
     e.add_field(
-        name="ℹ️ Comment se lit le verdict",
-        value=("Le régime est jugé par **famille** indépendante — **S&P** "
-               "(SPX/SPY/ES) et **Nasdaq** (NDX/QQQ/NQ) — et non symbole par "
-               "symbole. 🔴 2 familles négatives ou une en fort négatif · "
-               "🟠 1 famille négative ou VIX élevé · 🟢 sinon. La **confiance** "
-               "(forte/moyenne/faible) reflète la couverture des données."),
+        name="ℹ️ How to read the verdict",
+        value=("The regime is judged by independent **family** — **S&P** "
+               "(SPX/SPY/ES) and **Nasdaq** (NDX/QQQ/NQ) — not symbol by "
+               "symbol. 🔴 2 negative families or one strongly negative · "
+               "🟠 1 negative family or elevated VIX · 🟢 otherwise. **Confidence** "
+               "(high/medium/low) reflects data coverage."),
         inline=False,
     )
-    e.set_footer(text="Posté automatiquement à 8h30 / 15h25 / 15h35 (Paris), "
-                      "message de clôture à 16h, et à chaque changement de régime. "
-                      "Silencieux le week-end.")
+    e.set_footer(text="Posted automatically at 8:30 / 15:25 / 15:35 (Paris), "
+                      "close message at 16:00, and on every regime change. "
+                      "Silent on weekends.")
     await ctx.send(embed=e)
 
 
@@ -1197,12 +1197,12 @@ async def on_command_error(ctx: commands.Context, error: Exception) -> None:
     if isinstance(error, commands.CommandNotFound):
         await ctx.send(random.choice(_UNKNOWN_QUIPS).format(cmd=ctx.invoked_with))
         return
-    log.error("Erreur commande %s : %s", ctx.command, error, exc_info=error)
+    log.error("Command error %s: %s", ctx.command, error, exc_info=error)
 
 
 @bot.event
 async def on_ready() -> None:
-    log.info("Bot connecté : %s (salon cible %s)", bot.user, CHANNEL_ID)
+    log.info("Bot connected: %s (target channel %s)", bot.user, CHANNEL_ID)
     _journal()                    # ouvre (et crée au besoin) la base de recherche
     if not tick.is_running():
         tick.start()
@@ -1211,8 +1211,8 @@ async def on_ready() -> None:
 def main() -> None:
     if not TOKEN or not CHANNEL_ID:
         raise SystemExit(
-            "DISCORD_BOT_TOKEN et DISCORD_CHANNEL_ID doivent être définis "
-            "(cf. .env.example et le README)."
+            "DISCORD_BOT_TOKEN and DISCORD_CHANNEL_ID must be set "
+            "(see .env.example and the README)."
         )
     bot.run(TOKEN)
 

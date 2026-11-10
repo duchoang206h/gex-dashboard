@@ -28,7 +28,7 @@ from datetime import date, timedelta
 
 import requests
 
-from .config import UNDERLYINGS
+from .config import UNDERLYINGS, all_underlyings
 
 log = logging.getLogger(__name__)
 
@@ -207,10 +207,11 @@ def resolve_symbols(access: str) -> dict[str, str]:
     spot d'un autre instrument : c'est le même principe qu'ailleurs dans le
     projet, ne rien produire plutôt que du faux.
     """
-    out = {u.key: u.key for u in UNDERLYINGS.values()
+    rows = all_underlyings()
+    out = {u.key: u.key for _k, u in rows
            if u.enabled and not _is_future_key(u.key)}
     h = {"Authorization": f"Bearer {access}"}
-    for code in {u.future for u in UNDERLYINGS.values() if u.future and u.enabled}:
+    for code in {u.future for _k, u in rows if u.future and u.enabled}:
         cached = _FUTURE_STREAM_CACHE.get(code)
         if cached:
             out[code] = cached
@@ -223,10 +224,10 @@ def resolve_symbols(access: str) -> dict[str, str]:
             if items:
                 out[code] = _FUTURE_STREAM_CACHE[code] = items[0]["streamer-symbol"]
             else:
-                log.warning("Aucun contrat actif pour %s — %s exclu du flux", code, code)
+                log.warning("No active contract for %s — %s excluded from the feed", code, code)
         except Exception as exc:  # pragma: no cover - dépend du réseau
-            log.warning("Symbole future %s non résolu (%s) — exclu du flux "
-                        "plutôt que rabattu sur le ticker action homonyme",
+            log.warning("Future symbol %s unresolved (%s) — excluded from the feed "
+                        "rather than falling back to the same-named equity ticker",
                         code, exc)
     return out
 
@@ -294,13 +295,13 @@ class RealtimeQuotes:
         if self._started:
             return
         if not credentials_present():
-            log.info("Spot temps réel désactivé (identifiants tastytrade absents)")
+            log.info("Real-time spot disabled (tastytrade credentials missing)")
             self._state = "off"
             return
         self._started = True
         self._state = "connecting"
         threading.Thread(target=self._run, name="rtquote", daemon=True).start()
-        log.info("Spot temps réel : démarrage du flux dxFeed")
+        log.info("Real-time spot: starting dxFeed stream")
 
     # ---------------------------------------------------------------- lecture
     def price(self, key: str) -> float | None:
@@ -322,7 +323,7 @@ class RealtimeQuotes:
     def status(self, market_open: bool = True) -> tuple[str, str]:
         """(état, détail) — état ∈ off | connected | degraded | disconnected.
 
-        "degraded" = connecté mais plus aucun tick depuis STALE_S. Hors séance
+        "degraded" = connecté mais plus no tick since STALE_S. Hors séance
         ce silence est normal, l'état reste donc "connected".
         """
         if self._state == "off":
@@ -333,9 +334,9 @@ class RealtimeQuotes:
             newest = max((t.ts for t in self.ticks.values()), default=0.0)
         age = time.time() - newest if newest else None
         if age is None:
-            return "degraded", "aucune cotation reçue"
+            return "degraded", "no quote received"
         if market_open and age > STALE_S:
-            return "degraded", f"aucun tick depuis {int(age)} s"
+            return "degraded", f"no tick since {int(age)} s"
         return "connected", ""
 
     # -------------------------------------------------------------- interne
@@ -354,7 +355,7 @@ class RealtimeQuotes:
             except Exception as exc:
                 self._state = "disconnected"
                 self._detail = str(exc)[:120]
-                log.warning("Flux dxFeed interrompu (%s) — reprise dans %.0f s",
+                log.warning("dxFeed stream interrupted (%s) — resuming in %.0f s",
                             exc, backoff)
             time.sleep(backoff)
             backoff = min(backoff * 2, BACKOFF_MAX)
@@ -396,7 +397,7 @@ class RealtimeQuotes:
                         auth_sent = True
                         await send({"type": "AUTH", "channel": 0, "token": token})
                     elif state == "UNAUTHORIZED":
-                        raise RuntimeError("jeton dxFeed refusé")
+                        raise RuntimeError("dxFeed token rejected")
                     elif state == "AUTHORIZED":
                         await send({"type": "CHANNEL_REQUEST", "channel": 1,
                                     "service": "FEED",
@@ -410,13 +411,13 @@ class RealtimeQuotes:
                     await send({"type": "FEED_SUBSCRIPTION", "channel": 1, "add": subs})
                     self._state = "connected"
                     self._detail = ""
-                    log.info("Spot temps réel actif sur %s", ", ".join(symbols))
+                    log.info("Real-time spot active on %s", ", ".join(symbols))
                 elif typ == "FEED_DATA":
                     self._ingest(decode_compact_feed_data(m.get("data") or []))
                 elif typ == "KEEPALIVE":
                     await send({"type": "KEEPALIVE", "channel": 0})
                 elif typ == "ERROR":
-                    log.warning("dxFeed ERROR : %s", str(m)[:200])
+                    log.warning("dxFeed ERROR: %s", str(m)[:200])
 
     def _ingest(self, data: list) -> None:
         now = time.time()
@@ -505,7 +506,7 @@ class PublicDelayedQuotes(RealtimeQuotes):
         self._started = True
         self._state = "connecting"
         threading.Thread(target=self._run, name="rtquote-public", daemon=True).start()
-        log.info("Spot NQ/ES délayé (public, sans compte) : démarrage")
+        log.info("Delayed NQ/ES spot (public, no account): starting")
 
     def _quote_token(self) -> tuple[str, str, str]:
         # "demo" : aucun jeton réel requis (AUTH_STATE renvoie AUTHORIZED

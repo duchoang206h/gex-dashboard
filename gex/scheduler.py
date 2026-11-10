@@ -16,7 +16,7 @@ import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from . import backup, flowtape, idxopt, metrics, rates, roll, store
-from .config import SETTINGS, UNDERLYINGS
+from .config import SETTINGS, UNDERLYINGS, all_underlyings, is_watched
 from .ingest import ChainSnapshot, fetch_chain, fetch_index_spot
 from .metrics import ET, SummaryMetrics
 from . import futopt
@@ -57,22 +57,31 @@ class GlobalState:
 STATE = GlobalState()
 
 
-def pull_symbol(symbol: str, persist_snapshot: bool) -> None:
+def ingest_snapshot(symbol: str, snap: ChainSnapshot,
+                    persist_snapshot: bool,
+                    now: datetime | None = None) -> SummaryMetrics:
+    """Intègre une chaîne DÉJÀ téléchargée dans STATE (et éventuellement disque).
+
+    Séparé de `pull_symbol` pour le dashboard : quand l'utilisateur ajoute un
+    ticker, la validation télécharge la chaîne une seule fois, puis cette
+    fonction la publie immédiatement — sans second aller-retour CBOE ni attendre
+    le prochain cycle de 60 s.
+    """
     u = UNDERLYINGS[symbol]
-    snap = fetch_chain(symbol, u.cboe_symbol)
     enriched = metrics.enrich(snap)
     summary = metrics.summarize(snap, enriched, with_basis=u.future is not None)
-    now = datetime.now(ET)
+    now = now or datetime.now(ET)
 
     st = STATE.get(symbol)
     with STATE.lock:
         prev = st.enriched
         prev_feed_ts = st.last_feed_ts
 
-    # Flux delta : uniquement sur les cibles analysées, et seulement si le feed
-    # a réellement avancé depuis le dernier pull (sinon Δvolume = bruit nul).
-    # Sur un constituant, seuls comptent ses murs et son spot.
-    if (u.role == "target" and prev is not None
+    # Flux delta : sur les cibles analysées (et les constituants surveillés,
+    # qui ont leur propre onglet), et seulement si le feed a réellement avancé
+    # depuis le dernier pull (sinon Δvolume = bruit nul). Sur un constituant
+    # non affiché, seuls comptent ses murs et son spot.
+    if ((u.role == "target" or is_watched(symbol)) and prev is not None
             and prev_feed_ts != snap.feed_timestamp):
         flow = metrics.flow_delta(prev, enriched, snap.spot)
         flow["timestamp"] = snap.feed_timestamp
@@ -94,6 +103,84 @@ def pull_symbol(symbol: str, persist_snapshot: bool) -> None:
         f"{summary.zero_gamma:.0f}" if summary.zero_gamma else "n/a",
         f"{summary.basis:+.1f}" if summary.basis is not None else "n/a",
     )
+    return summary
+
+
+def pull_symbol(symbol: str, persist_snapshot: bool) -> None:
+    u = UNDERLYINGS[symbol]
+    snap = fetch_chain(symbol, u.cboe_symbol)
+    ingest_snapshot(symbol, snap, persist_snapshot)
+
+
+# Un seul balayage de constituants à la fois : un cycle peut durer >60 s
+# (requête CBOE lente), et le scheduler relance pull_all chaque minute.
+_CONSTITUENT_PULL_LOCK = threading.Lock()
+
+
+def pull_constituents(persist_snapshot: bool) -> None:
+    """Rafraîchit les constituants HORS du cycle cibles.
+
+    Les ~30 chaînes de constituants peuvent prendre >90 s (et une requête CBOE
+    peut se bloquer ~60 s). Les garder dans pull_all retardait alors le
+    rafraîchissement des cibles du cycle suivant : ce balayage tourne donc dans
+    son propre thread, jamais sur le chemin critique du dashboard.
+    """
+    if not _CONSTITUENT_PULL_LOCK.acquire(blocking=False):
+        log.info("Constituent pull already running — cycle skipped")
+        return
+    try:
+        for key, u in all_underlyings():
+            if not u.enabled or u.role != "constituent" or is_watched(key):
+                # un constituant surveillé est déjà tiré à 60 s par pull_all
+                continue
+            try:
+                pull_symbol(key, persist_snapshot)
+            except Exception as e:  # noqa: BLE001 — un constituant ne bloque rien
+                log.exception("Pull failed %s", key)
+                with STATE.lock:
+                    STATE.last_error = f"{key}: {e}"
+    finally:
+        _CONSTITUENT_PULL_LOCK.release()
+
+
+def seed_cached_constituents() -> int:
+    """Réamorce les constituants depuis le dernier snapshot disque.
+
+    Au démarrage, puller les ~30 constituants prend ~95 s et une requête CBOE
+    peut se bloquer 60 s. Leurs murs reposent sur l'open interest publié une
+    fois par jour : le snapshot de la veille suffit à peupler la confluence
+    immédiatement. Le premier cycle régulier les rafraîchit ensuite.
+    """
+    n = 0
+    for key, u in all_underlyings():
+        if not u.enabled or u.role != "constituent":
+            continue
+        st = STATE.get(key)
+        with STATE.lock:
+            if st.snapshot is not None:
+                continue
+        cached = store.load_latest_snapshot(key)
+        if cached is None:
+            continue
+        df, ts = cached
+        if df.empty or "spot" not in df.columns:
+            continue
+        spot = float(df["spot"].iloc[0])
+        snap = ChainSnapshot(
+            symbol=key, spot=spot,
+            feed_timestamp=ts.replace(tzinfo=None),
+            fetched_at=datetime.now(UTC), options=df,
+        )
+        summary = metrics.summarize(snap, df, with_basis=False)
+        with STATE.lock:
+            st.snapshot = snap
+            st.enriched = df
+            st.summary = summary
+            st.last_feed_ts = snap.feed_timestamp
+        n += 1
+    if n:
+        log.info("Constituents reseeded from disk: %d", n)
+    return n
 
 
 class _Cadence:
@@ -131,18 +218,37 @@ def pull_vix() -> None:
         spot, ts = fetch_index_spot("_VIX")
         store.append_index_spot("vix", {"timestamp": ts, "vix": spot})
     except Exception:  # noqa: BLE001 — un échec VIX ne doit rien casser d'autre
-        log.exception("Échec pull VIX")
+        log.exception("VIX pull failed")
 
 
-def pull_all(force: bool = False) -> None:
+def pull_all(force: bool = False, include_constituents: bool = True) -> None:
     if SETTINGS.market_hours_only and not market_is_open() and not force:
         return
     persist = _CADENCE.tick()
-    due = _CONSTITUENT_CADENCE.tick()
-    persist_constituent = _CONSTITUENT_SNAPSHOT.tick()
+    # Au démarrage, on ne ticke pas les cadences constituants : le premier
+    # cycle régulier (60 s plus tard) les rafraîchit, après le réamorçage
+    # disque de `seed_cached_constituents`.
+    due = _CONSTITUENT_CADENCE.tick() if include_constituents else False
+    persist_constituent = (_CONSTITUENT_SNAPSHOT.tick()
+                           if include_constituents else False)
     if due or force:
         pull_vix()
-    for key, u in UNDERLYINGS.items():
+    if due and include_constituents and not force:
+        # Thread séparé : les constituants ne doivent jamais retarder les
+        # cibles du cycle suivant (cf. pull_constituents). Jamais pendant le
+        # pull de démarrage (force) : celui-ci est déjà couvert par le cache
+        # disque et ne doit pas lancer 30 requêtes en arrière-plan.
+        threading.Thread(target=pull_constituents, args=(persist_constituent,),
+                         name="pull-constituents", daemon=True).start()
+    rows = all_underlyings()
+    if force:
+        # Au démarrage, l'utilisateur attend une CIBLE, pas les ~30
+        # constituants de confluence. Sans ce tri, un ticker ajouté depuis
+        # l'interface (inséré en fin de UNDERLYINGS) était tiré APRÈS tous les
+        # constituants : ~2 min de « waiting for first pull » sur une simple
+        # reprise du dashboard. Les cibles passent d'abord, le reste ensuite.
+        rows.sort(key=lambda item: item[1].role != "target")
+    for key, u in rows:
         if not u.enabled:
             continue
         if u.role == "context":
@@ -153,14 +259,13 @@ def pull_all(force: bool = False) -> None:
             # collecte native séparée (pull_native_options) : une chaîne
             # coûte ~90 s, incompatible avec cette boucle à 60 s
             continue
-        is_constituent = u.role == "constituent"
-        if is_constituent and not (due or force):
+        if u.role == "constituent" and not is_watched(key):
+            # traité par pull_constituents (thread séparé), jamais ici
             continue
         try:
-            pull_symbol(key, persist_snapshot=(persist_constituent if is_constituent
-                                               else persist))
+            pull_symbol(key, persist_snapshot=persist)
         except Exception as e:  # noqa: BLE001 — la boucle doit survivre
-            log.exception("Échec pull %s", key)
+            log.exception("Pull failed %s", key)
             with STATE.lock:
                 STATE.last_error = f"{key}: {e}"
 
@@ -186,11 +291,11 @@ def push_data_repo() -> None:
         if has_remote:
             subprocess.run(["git", "-C", str(repo), "push"], check=True,
                            capture_output=True, timeout=120)
-            log.info("Repo data poussé (%s)", day)
+            log.info("Data repo pushed (%s)", day)
         else:
-            log.info("Repo data commité localement (%s, pas de remote)", day)
+            log.info("Data repo committed locally (%s, no remote)", day)
     except Exception:
-        log.exception("Échec du push du repo data — données locales intactes")
+        log.exception("Data repo push failed — local data intact")
 
 
 def build_native_summary(code: str, df: pd.DataFrame,
@@ -288,7 +393,7 @@ def pull_native_options() -> None:
             age_s = (datetime.now(ET) - ts.replace(tzinfo=ET)).total_seconds()
             if 0 <= age_s < NATIVE_CACHE_FRESH_S:
                 _seed_native_state(code, df_cached, ts.replace(tzinfo=ET))
-                log.info("%s (natif) : cache de %.0f s, collecte live sautée",
+                log.info("%s (native): cache is %.0f s old, live collection skipped",
                          code, age_s)
                 continue
         try:
@@ -299,11 +404,11 @@ def pull_native_options() -> None:
             store.save_snapshot(code, df, now)
             summary = _seed_native_state(code, df, now)
             store.append_history(summary.as_row())
-            log.info("%s (natif) pull ok — spot=%.2f netGEX=%.2f Bn zeroG=%s",
+            log.info("%s (native) pull ok — spot=%.2f netGEX=%.2f Bn zeroG=%s",
                      code, summary.spot, summary.net_gex / 1e9,
                      f"{summary.zero_gamma:.0f}" if summary.zero_gamma else "n/a")
         except Exception:  # noqa: BLE001 — un échec ne doit rien casser d'autre
-            log.exception("%s : échec de la collecte native", code)
+            log.exception("%s: native collection failed", code)
 
 
 def pull_native_options_fast() -> None:
@@ -335,10 +440,10 @@ def pull_native_options_fast() -> None:
                 continue
             now = datetime.now(ET)
             summary = _seed_native_state(code, df, now)
-            log.info("%s (natif, rapide) pull ok — spot=%.2f netGEX=%.2f Bn",
+            log.info("%s (native, fast) pull ok — spot=%.2f netGEX=%.2f Bn",
                      code, summary.spot, summary.net_gex / 1e9)
         except Exception:  # noqa: BLE001 — un échec ne doit rien casser d'autre
-            log.exception("%s : échec de la collecte native rapide", code)
+            log.exception("%s: fast native collection failed", code)
 
 
 def native_index_key(symbol: str) -> str:
@@ -374,11 +479,11 @@ def pull_native_index() -> None:
             store.save_snapshot(key, df, now)
             summary = _seed_native_state(key, df, now)
             store.append_history(summary.as_row())
-            log.info("%s (indice natif) pull ok — spot=%.2f netGEX=%.2f Bn zeroG=%s",
+            log.info("%s (native index) pull ok — spot=%.2f netGEX=%.2f Bn zeroG=%s",
                      symbol, summary.spot, summary.net_gex / 1e9,
                      f"{summary.zero_gamma:.0f}" if summary.zero_gamma else "n/a")
         except Exception:  # noqa: BLE001 — un échec ne doit rien casser d'autre
-            log.exception("%s : échec de la chaîne d'indice native", symbol)
+            log.exception("%s: native index chain failed", symbol)
 
 
 def _flush_bars(bars: list, source: str) -> None:
@@ -398,7 +503,7 @@ def _flush_bars(bars: list, source: str) -> None:
         try:
             store.append_prices(symbol, rows, rows[0]["timestamp"])
         except Exception:  # noqa: BLE001 — une écriture ratée ne doit rien casser
-            log.exception("Échec écriture des prix %s", symbol)
+            log.exception("Failed to write prices %s", symbol)
 
 
 def flush_prices() -> None:
@@ -452,7 +557,7 @@ def flush_tape() -> None:
         try:
             store.append_tape(symbol, rows, rows[0]["timestamp"])
         except Exception:  # noqa: BLE001 — une écriture ratée ne doit rien casser
-            log.exception("Échec écriture de l'order flow %s", symbol)
+            log.exception("Failed to write order flow %s", symbol)
 
 
 def flush_optprints() -> None:
@@ -471,7 +576,7 @@ def flush_optprints() -> None:
         try:
             store.append_optprints(symbol, lst, datetime.strptime(hour, "%Y-%m-%d %H"))
         except Exception:  # noqa: BLE001 — une écriture ratée ne doit rien casser
-            log.exception("Échec écriture des prints bruts %s", symbol)
+            log.exception("Failed to write raw prints %s", symbol)
 
 
 def flush_ticks() -> None:
@@ -510,7 +615,7 @@ def flush_ticks() -> None:
             try:
                 roll.record_volumes(symbol, day, volumes.get(day, {}))
             except Exception:  # noqa: BLE001 — l'état de roll ne doit rien bloquer
-                log.exception("Capture tick : échec mémorisation des volumes %s", symbol)
+                log.exception("Tick capture: failed to record volumes %s", symbol)
             # 2. N'écrire que le contrat dominant : la série sur disque reste
             #    une série CONTINUE, comparable au jeu de référence. L'ordre
             #    passé est celui du courtier ([actif, suivant]) : c'est lui qui
@@ -525,7 +630,7 @@ def flush_ticks() -> None:
             try:
                 store.append_ticks(symbol, rows_day, items[0][0])
             except Exception:  # noqa: BLE001 — une écriture ratée ne doit rien casser
-                log.exception("Capture tick : échec écriture %s", symbol)
+                log.exception("Tick capture: write failed %s", symbol)
 
 
 def add_flush_jobs(sched: BackgroundScheduler) -> None:
@@ -580,7 +685,7 @@ def resolve_scalp_signals(now: datetime | None = None) -> None:
                 outcome_move_pts=move,
                 outcome=scalp.classify_outcome(row["symbol"], row["direction"], move))
     except Exception:  # noqa: BLE001 — calibration, jamais bloquant pour le reste
-        log.exception("Résolution des signaux /scalp échouée")
+        log.exception("Scalp signal resolution failed")
 
 
 def start_scheduler(embedded_capture: bool = True) -> BackgroundScheduler:
@@ -651,7 +756,13 @@ def start_scheduler(embedded_capture: bool = True) -> BackgroundScheduler:
     # le lancement sur un appel réseau ; repli sur la constante si indisponible).
     threading.Thread(target=rates.refresh, daemon=True).start()
     # Premier pull immédiat (même hors marché : affiche le dernier état connu).
-    threading.Thread(target=pull_all, kwargs={"force": True}, daemon=True).start()
+    # Cibles d'abord (affichage), constituants réamorcés depuis le disque :
+    # plus de course de ~95 s avant que la confluence soit disponible.
+    def _startup_pull() -> None:
+        pull_all(force=True, include_constituents=False)
+        seed_cached_constituents()
+
+    threading.Thread(target=_startup_pull, daemon=True).start()
     # Idem pour NQ/ES natifs : sans cet appel, ils resteraient invisibles dans
     # l'interface jusqu'à la première exécution planifiée. La version rapide
     # (fenêtre resserrée) suffit à amorcer STATE ; la large tourne aussi une

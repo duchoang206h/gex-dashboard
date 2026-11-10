@@ -4,257 +4,9 @@ langues — c'est le vocabulaire courant des traders d'options, FR compris.
 """
 from __future__ import annotations
 
-LANGS = ["fr", "en"]
+LANGS = ["en"]
 
 TR: dict[str, dict[str, str]] = {
-    "fr": {
-        "app_title": "Gamma / Delta Exposure",
-        "waiting_first_pull": "En attente du premier pull CBOE…",
-        "waiting_native": "Collecte native en cours (chaîne CME complète, ~3 à 5 min)…",
-        "card_spot_delayed": "Spot (délayé, sans compte)",
-        "card_spot_delayed_sub": "flux public dxFeed, ~15-20 min de retard",
-        "native_no_chain": "Chaîne d'options native indisponible sans compte courtier.",
-        "native_no_chain_delayed": "Chaîne d'options native indisponible sans compte — spot délayé ci-dessous.",
-        "native_banner": "Données {sym} indisponibles : nécessitent un compte courtier (identifiants dxFeed manquants).",
-        "native_more_info": "Plus d'infos",
-        "native_overlay_title": "{sym} nécessite un compte courtier",
-        "native_overlay_body": "Les chaînes natives sur futures CME ({sym}) exigent un flux temps réel "
-                        "dxFeed via un compte courtier — gratuit avec le compte, mais pas configuré ici. "
-                        "Ce n'est pas pénalisant en attendant : {alt} affiche des niveaux quasi "
-                        "identiques, transposables vers {sym} via l'échelle dans le sélecteur d'unité.",
-        "native_overlay_link": "Comment activer le temps réel",
-        "native_overlay_ok": "OK, afficher {alt}",
-        "no_data_window": "Pas de données dans la fenêtre de strikes",
-        "no_flow_day": "Aucun flux enregistré le {day}",
-        "not_enough_history": "Historique insuffisant (revenez après quelques snapshots)",
-        "no_iv": "Pas d'IV exploitable",
-        "gex_title": "Gamma Exposure par strike — {bucket}",
-        "dex_title": "Delta Exposure par strike — {bucket}",
-        "flow_title": "Flux delta options (proxy Δvolume×δ, barres 1 min — délayé ~15 min)",
-        "hist_title": "GEX net — historique ($Bn par 1%)",
-        "spotzg_title": "Spot vs Gamma Flip",
-        "smile_title": "Skew IV (options OTM) par expiration",
-        "axis_bn_per_move": "$Bn par 1% de move",
-        "axis_m_per_min": "$M/min",
-        "axis_cum_m": "Cumul $M",
-        "axis_iv": "IV %",
-        "legend_spot": "Spot",
-        "legend_zg": "Gamma Flip",
-        "legend_flow": "Flux/min",
-        "legend_cum": "Cumul",
-        "heat_title": "Profil de gamma et parcours du prix — {day}",
-        "heat_axis_time": "Heure",
-        "heat_axis_bn": "Gamma Exposure ($Bn par 1%)",
-        "legend_gex_oi": "GEX (open interest)",
-        "legend_gex_vol": "GEX (volume du jour)",
-        "heat_axis_strike": "Strike",
-        "heat_day_label": "Séance :",
-        "heat_hint": "Barres = gamma par strike (axe du haut, $Bn) ; courbe = parcours du prix (axe du bas). Les deux partagent l'axe des prix : c'est leur croisement qui renseigne. Molette ou glissement sur l'axe des prix (à gauche) pour resserrer l'échelle ; double-clic pour revenir à la vue complète.",
-        "heat_none": "Aucun snapshot enregistré le {day}",
-        "tab_heat": "Heatmap",
-        "gflow_title": "Gamma échangé cumulé — calls vs puts (proxy CBOE, délayé)",
-        "gflow_title_signed": "Gamma échangé cumulé — calls vs puts (signé, dxFeed)",
-        "flow_title_signed": "Flux delta signé (côté agresseur, dxFeed — barres 1 min)",
-        "legend_gcalls": "Calls (gamma +)",
-        "legend_gputs": "Puts (gamma −)",
-        "legend_gnet": "Net",
-        "axis_gflow_bn": "$Bn de gamma cumulé",
-        # Order flow SIGNÉ (cf. gex/flowtape.py) — à distinguer du flux delta
-        # juste au-dessus, qui est un proxy non signé : ici le côté agresseur
-        # vient de la source, il n'est pas déduit.
-        "tape_title": "Order flow signé cumulé — vu côté dealers",
-        "legend_tape_calls": "Calls",
-        "legend_tape_puts": "Puts",
-        "legend_tape_net": "Net",
-        "axis_tape": "Contrats nets cumulés",
-        "axis_tape_delta": "Delta net dealers cumulé ($M)",
-        "hedge_title": "Pression de couverture des dealers sur le sous-jacent",
-        "hedge_empty": "Pas encore de flux de couverture (attendre les prochains prints, ou redémarrage récent).",
-        "hedge_buy": "dealers ACHÈTENT le sous-jacent",
-        "hedge_sell": "dealers VENDENT le sous-jacent",
-        "hedge_session": "séance",
-        "hedge_leg_call_buy": "Calls achetés (dealers rachètent)",
-        "hedge_leg_put_sell": "Puts vendus (dealers rachètent)",
-        "hedge_leg_put_buy": "Puts achetés (dealers vendent)",
-        "hedge_leg_call_sell": "Calls vendus (dealers vendent)",
-        "hedge_cum": "Net cumulé",
-        "hedge_axis": "Sous-jacent à acheter (+) / vendre (−), $M / min",
-        "hedge_axis_cum": "Net cumulé ($M)",
-        "unit_contracts": "contrats",
-        "unit_musd": "$M",
-        "no_tape_day": "Aucun order flow enregistré le {day}",
-        "tape_note": ("Convention dealers, comme le bandeau : + = dealers longs delta. "
-                      "Côté agresseur donné par la source (non déduit), jambes de combos "
-                      "exclues du net, prints pondérés par la taille. "
-                      "Données courtier — non redistribuables."),
-        "tape_series_label": "Séries affichées",
-        "card_spot": "Spot (délayé 15 min)",
-        "card_spot_rt": "Spot (temps réel)",
-        "card_spot_live": "GEX net recalculé à ce spot",
-        "card_feed": "feed {local} ({et} ET)",
-        "card_net_gex": "GEX net / 1%",
-        "stabilizing": "stabilisant",
-        "destabilizing": "déstabilisant",
-        "card_net_dex": "DEX net / pt",
-        "dex_long": "dealers longs delta",
-        "dex_short": "dealers courts delta",
-        "card_zero_gamma": "Gamma Flip",
-        "card_zg_sub": "spot {sign}{pts} pts (régime γ{reg})",
-        "card_gex_0dte": "GEX 0DTE",
-        "card_pc_oi": "P/C Open Interest",
-        "card_pc_vol": "P/C Volume",
-        "pc_gauge_calls": "Calls {pct}%",
-        "pc_gauge_puts": "Puts {pct}%",
-        "card_status": "Statut",
-        "waiting_short": "en attente du premier pull",
-        "levels_prefix": "Niveaux 0DTE ({exp}) :",
-        "levels_unavailable": "Niveaux GEX 0DTE : indisponibles",
-        "tv_copy_title": "Copier les niveaux pour TradingView (échelle {scale})",
-        "side_call": "call",
-        "side_put": "put",
-        "bucket_0DTE": "0DTE",
-        "bucket_week": "Semaine",
-        "bucket_month": "Mois",
-        "bucket_all": "Tout",
-        "majors_only": "Major Walls seulement",
-        "unit_index": "Indice",
-        "unit_futures": "Futures",
-        "brand_sub": "SPX · NDX · SPY · QQQ — données CBOE delayed",
-        # spot temps réel actif : les CHAÎNES restent délayées, seul le prix
-        # courant est en direct — la nuance doit rester lisible
-        "brand_sub_rt": "SPX · NDX · SPY · QQQ · NQ · ES — spot et chaînes temps réel (dxFeed)",
-        "tt_connect": "Connecter tastytrade",
-        "rt_connected": "Spot temps réel actif",
-        "rt_degraded": "Flux dégradé — cotations en retard, repli sur le spot CBOE",
-        "rt_disconnected": "Flux déconnecté — spot CBOE delayed utilisé",
-        "lbl_expiry": "Échéance",
-        "lbl_window": "Fenêtre",
-        "tab_main": "Vue principale",
-        "tab_profile": "Gamma Profile",
-        "tab_greeks2": "Vanna & Charm",
-        "tab_pos": "Positionnement",
-        "tab_scalp": "Scalp",
-        "tab_tape": "Tape",
-        "tape_hint": "Transactions individuelles en direct sur le sous-jacent sélectionné, "
-                     "les plus récentes en haut. Bleu = acheteur agresse, rouge = vendeur "
-                     "agresse (côté donné par la source). Les jambes de combos sont grisées "
-                     "et marquées ⛓. Données courtier — non redistribuables.",
-        "tape_size_label": "Taille min.",
-        "tape_size_all": "Tout",
-        "tape_show_combos": "Afficher les combos",
-        "tape_col_time": "Heure",
-        "tape_col_contract": "Contrat",
-        "tape_col_side": "Sens",
-        "tape_col_size": "Taille",
-        "tape_col_price": "Prix",
-        "tape_col_notional": "Notionnel",
-        "tape_combo": "Jambe de combo — pas un ordre directionnel",
-        "tape_empty_off": "Tape indisponible : nécessite un compte courtier connecté.",
-        "tape_empty_wait": "En attente de transactions (marché peu actif ou hors séance)…",
-        "profile_title": "Profil de GEX net selon le spot ($Bn par 1%)",
-        "profile_by_exp": "Profil par échéance",
-        "profile_axis": "Spot hypothétique",
-        "profile_hint": "IV et maturités figées : seul le spot varie. La pente au prix "
-                        "actuel indique la vitesse de dégradation du régime.",
-        "slope_card": "Pente au spot",
-        "slope_unit": "$Bn par 1% de move",
-        "vex_title": "Vanna Exposure par strike ($M par point de vol)",
-        "cex_title": "Charm Exposure par strike ($M de delta par jour)",
-        "vex_card": "Vanna Exposure nette",
-        "cex_card": "Charm Exposure nette",
-        "vex_hint": "Vanna : re-hedging quand l'IV bouge d'un point. "
-                    "Charm : flux mécanique par jour écoulé, moteur des dérives de fin de séance.",
-        "pos_title": "Variation d'open interest par strike (vs {day})",
-        "pos_hint": "L'OI est publié une fois par jour : cet écart mesure le positionnement "
-                    "net ouvert ou fermé, à distinguer du gamma résiduel.",
-        "pos_no_prev": "Pas de séance précédente en base — revenez après quelques jours de collecte.",
-        "pos_no_change": "Aucune variation : l'open interest n'est publié qu'une fois par jour "
-                         "(le matin). Comparaison significative à partir de la prochaine séance.",
-        "legend_calls": "Calls",
-        "legend_puts": "Puts",
-        "opened": "ouvertes",
-        "closed": "fermées",
-        "lbl_scale": "Échelle",
-        "scale_basis": "niveaux convertis en {scale} (basis appliqué)",
-        "scale_ratio": "niveaux transposés en {scale} (ratio ×{ratio})",
-        "scale_cross": "⚠ transposition croisée en {scale} (ratio ×{ratio}) — "
-                       "repère instantané, le ratio dérive dans le temps",
-        "flow_day_label": "Jour de flux :",
-        "gflow_series_label": "Séries :",
-        "heat_levels_label": "Niveaux :",
-        "heat_levels_gex_walls": "Murs GEX",
-        "last_session": "Dernière séance",
-        "footer": "Données CBOE delayed (~15 min) — outil d'analyse, pas d'exécution.",
-        "footer_rt": "Données dxFeed temps réel (compte courtier, usage personnel) — outil d'analyse, pas d'exécution.",
-        "hover_strike": "Strike",
-        "hover_net": "Net",
-        "hover_flow": "Flux",
-        "hover_cum": "Cumul",
-        "regime_label": "Lecture du régime",
-        "regime_frein": "Régime freiné (gamma positif) : les dealers vendent les hausses et "
-                        "achètent les baisses, range probable. Delta dealers {sens_delta} — "
-                        "pression de couverture {pression} latente en toile de fond, léger "
-                        "biais {biais} si le range casse.",
-        "regime_accel_modere": "Régime accélérateur (gamma négatif) : un mouvement s'auto-"
-                        "entretient une fois lancé. Delta dealers {sens_delta} (pression de "
-                        "couverture {pression}) : biais {biais} si un mouvement démarre. "
-                        "Rester prudent, le trading contrarien est risqué dans ce régime.",
-        "regime_accel_fort": "Régime accélérateur (gamma négatif) ET forte pression de "
-                        "couverture {pression} des dealers (delta {sens_delta}) : les deux "
-                        "mécaniques s'additionnent. Risque élevé de mouvement {biais} "
-                        "auto-entretenu — le trading contrarien y est particulièrement risqué.",
-        "regime_disclaimer": "Lecture mécanique de la couverture dealers, pas un signal "
-                        "d'entrée ni une direction garantie.",
-
-        # --- Bandeau /scalp (gex/scalp.py::session_state, assess) ------------
-        "sc_weekend": "Week-end",
-        "sc_pre_open": "Avant l'open US",
-        "sc_closed": "Séance US terminée",
-        "sc_session_open": "Séance US · {minutes} min · fenêtre contrarienne",
-        "sc_session_late": "Séance US · {minutes} min · après 16h15 (contrarien plus risqué)",
-        "sc_insufficient_title": "Données insuffisantes",
-        "sc_insufficient_detail": "Pas assez de prix récents (hors séance ou flux coupé).",
-        "sc_calm_title": "Pas de mouvement directionnel",
-        "sc_amplification_title": "Amplification {side} détectée{renforce}",
-        "sc_brake_title": "Couverture à contre-courant : frein sur le mouvement {side_m}",
-        "sc_unsupported_title": "Mouvement {side_m} — pas de lecture de flux dealers",
-        "sc_renforce_defavorable": " — gamma défavorable",
-        "sc_renforce_favorable": " — malgré un gamma positif",
-        "sc_detail": "Mouvement {move_pts:+.0f} pts / 5 min · {flux_txt}"
-                    "{gamma_txt}{toward_flip_txt}",
-        # V2 (swing H/L) : le mouvement n'est plus mesuré sur une fenêtre
-        # fixe de 5 min mais depuis le dernier pivot swing confirmé —
-        # mentionner "5 min" induisait en erreur (demande explicite,
-        # 2026-10-05).
-        "sc_detail_swing": "Mouvement {move_pts:+.0f} pts · {flux_txt}"
-                    "{gamma_txt}{toward_flip_txt}",
-        "sc_flux_net": "flux net {net:+.0f} M$ ({ratio:.0%} à sens unique)",
-        "sc_flux_none": "aucun flux de couverture",
-        "sc_gamma_negatif": " · gamma négatif",
-        "sc_gamma_positif": " · gamma positif",
-        "sc_toward_flip": " · prix vers le Flip",
-
-        # --- Panneau absorption /scalp (gex/app.py::scalp_absorb_panel) -------
-        "sc_absorb_title": "Absorption / iceberg (candidats)",
-        "sc_absorb_empty": "Aucune absorption détectée sur les 3 dernières minutes",
-        "sc_absorb_support": "support",
-        "sc_absorb_resistance": "résistance",
-        "sc_absorb_age_s": "il y a {n:.0f} s",
-        "sc_absorb_age_min": "il y a {n:.0f} min",
-        "sc_absorb_hvl": " · HVL",
-        "sc_absorb_hvl_confirmed": " · HVL confirmé",
-        "sc_absorb_tooltip": "{n} prints, {total:.0f} contrats — candidat, pas confirmé "
-                        "(top-of-book seulement)",
-        "sc_absorb_tooltip_hvl": ". Volume profile de séance : palier {price:,.0f} concentre "
-                        "{vol:.0f} contrats, delta {delta:+.0f}.",
-        "sc_light_mouvement": "mouvement",
-        "sc_light_flux": "flux",
-        "sc_light_gamma": "gamma",
-        "sc_waiting_levels": "En attente des niveaux…",
-        "sc_since_open": "{pts} pts depuis l'open",
-        "sc_vix_high_note": " · allers-retours favorables",
-        "sc_vix_low_note": " · calme : direction possible",
-    },
     "en": {
         "app_title": "Gamma / Delta Exposure",
         "waiting_first_pull": "Waiting for first CBOE pull…",
@@ -279,10 +31,12 @@ TR: dict[str, dict[str, str]] = {
         "gex_title": "Gamma Exposure by strike — {bucket}",
         "dex_title": "Delta Exposure by strike — {bucket}",
         "flow_title": "Options delta flow (Δvolume×δ proxy, 1-min bars — ~15 min delayed)",
-        "hist_title": "Net GEX — history ($Bn per 1%)",
+        "hist_title": "Net GEX — history ({unit} per 1%)",
         "spotzg_title": "Spot vs Gamma Flip",
         "smile_title": "IV skew (OTM options) by expiration",
         "axis_bn_per_move": "$Bn per 1% move",
+        "axis_money_per_move": "{unit} per 1% move",
+        "axis_money_per_pt": "{unit} per point",
         "axis_m_per_min": "$M/min",
         "axis_cum_m": "Cumulative $M",
         "axis_iv": "IV %",
@@ -393,7 +147,7 @@ TR: dict[str, dict[str, str]] = {
         "tape_combo": "Combo leg — not a directional order",
         "tape_empty_off": "Tape unavailable: requires a connected broker account.",
         "tape_empty_wait": "Waiting for trades (quiet market or outside session)…",
-        "profile_title": "Net GEX profile vs spot ($Bn per 1%)",
+        "profile_title": "Net GEX profile vs spot ({unit} per 1%)",
         "profile_by_exp": "Profile by expiration",
         "profile_axis": "Hypothetical spot",
         "profile_hint": "IV and maturities frozen: only spot moves. The slope at the current "
@@ -489,35 +243,41 @@ TR: dict[str, dict[str, str]] = {
         "sc_light_gamma": "gamma",
         "sc_waiting_levels": "Waiting for levels…",
         "sc_since_open": "{pts} pts since the open",
+        # --- ticker added from the search box -------------------------------
+        "ticker_empty": "Enter a ticker.",
+        "ticker_invalid": "Unknown ticker or no CBOE option chain.",
+        "ticker_exists": "{ticker} is already tracked.",
+        "ticker_watch_added": "{ticker} added as a tab (existing constituent, "
+                              "refreshed every 60 s).",
+        "ticker_watch_exists": "{ticker} is already shown as a tab.",
+        "ticker_context": "{ticker} is a context ticker "
+                          "(no options chain).",
+        "ticker_added": "{ticker} added — first data loaded.",
+        "ticker_failed": "Failed for {ticker}: {err}",
         "sc_vix_high_note": " · favorable for whipsaws",
         "sc_vix_low_note": " · calm: directional move possible",
     },
 }
 
-# haussière/haussier (accord grammatical FR) — pas de distinction en anglais,
-# cf. _PRESSURE_WORD/_BIAS_WORD ci-dessus pour le même principe.
-_SIDE_WORD = {"fr": {1: "haussière", -1: "baissière"}, "en": {1: "bullish", -1: "bearish"}}
-_SIDE_WORD_M = {"fr": {1: "haussier", -1: "baissier"}, "en": {1: "bullish", -1: "bearish"}}
+_SIDE_WORD = {1: "bullish", -1: "bearish"}
+_SIDE_WORD_M = {1: "bullish", -1: "bearish"}
 
-# Mots dérivés des codes neutres renvoyés par metrics.regime_read (pas de mot
-# figé dans une langue à la source, cf. commentaire dans regime_read).
-_PRESSURE_WORD = {"fr": {"sell": "vendeuse", "buy": "acheteuse"},
-                  "en": {"sell": "selling", "buy": "buying"}}
-_BIAS_WORD = {"fr": {"down": "baissier", "up": "haussier"},
-             "en": {"down": "downward", "up": "upward"}}
+# Derived from the neutral codes returned by metrics.regime_read.
+_PRESSURE_WORD = {"sell": "selling", "buy": "buying"}
+_BIAS_WORD = {"down": "downward", "up": "upward"}
 
 
 def t(lang: str, key: str, **fmt) -> str:
-    s = TR.get(lang, TR["fr"]).get(key, key)
+    s = TR.get(lang, TR["en"]).get(key, key)
     return s.format(**fmt) if fmt else s
 
 
 def regime_text(lang: str, regime: dict) -> str:
-    """Compose le texte de lecture de régime à partir du dict `metrics.regime_read`."""
+    """Compose the regime reading from the `metrics.regime_read` dict."""
     p = regime["params"]
     words = {"sens_delta": p["sens_delta"],
-             "pression": _PRESSURE_WORD[lang][p["pression_code"]],
-             "biais": _BIAS_WORD[lang][p["biais_code"]]}
+             "pression": _PRESSURE_WORD[p["pression_code"]],
+             "biais": _BIAS_WORD[p["biais_code"]]}
     return t(lang, regime["i18n_key"], **words)
 
 

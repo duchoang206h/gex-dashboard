@@ -322,7 +322,7 @@ def front_futures_expiry(today: date) -> date:
             e = third_friday(y, m)
             if e >= today:
                 return e
-    raise ValueError("échéance introuvable")
+    raise ValueError("expiry not found")
 
 
 def futures_basis(df: pd.DataFrame, spot: float, today: date | None = None) -> float | None:
@@ -366,7 +366,7 @@ def futures_basis(df: pd.DataFrame, spot: float, today: date | None = None) -> f
     # taux - dividendes sur < 1 an). Au-delà, les quotes sont aberrantes et une
     # conversion silencieuse fausserait tous les niveaux.
     if abs(basis) > 0.02 * spot:
-        log.warning("Basis aberrant ignoré : %+.1f pts sur spot %.0f (%d paires)",
+        log.warning("Ignoring abnormal basis: %+.1f pts on spot %.0f (%d pairs)",
                     basis, spot, len(fwds))
         return None
     return basis

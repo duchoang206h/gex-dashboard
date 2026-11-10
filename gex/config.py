@@ -1,8 +1,15 @@
 """Configuration centrale du dashboard GEX."""
 from __future__ import annotations
 
+import json
+import logging
+import os
+import re
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 def _default_data_dir() -> Path:
     """data/ à la racine du dépôt si on tourne depuis les sources, sinon dans
@@ -148,9 +155,199 @@ UNDERLYINGS: dict[str, Underlying] = {
 }
 
 
+# --- tickers ajoutés depuis l'interface -----------------------------------
+# Les cibles du bloc ci-dessus sont statiques ; celles-ci sont saisies dans la
+# barre de recherche du dashboard et persistent dans data/tickers.json. Elles
+# suivent exactement le même chemin de collecte que SPX/SPY/QQQ (endpoint CBOE
+# delayed, pull 60 s), d'où l'insertion directe dans UNDERLYINGS : scheduler,
+# échelles et callbacks lisent déjà ce dictionnaire.
+USER_TICKERS_FILE = DATA_DIR / "tickers.json"
+_TICKERS_LOCK = threading.RLock()
+_USER_TICKERS: set[str] = set()
+# Constituants déjà collectés pour la confluence, mais explicitement affichés
+# comme onglets par l'utilisateur. Aucun doublon de collecte : le scheduler les
+# rafraîchit à 60 s et le balayage constituants les ignore.
+_WATCHED: set[str] = set()
+
+# Tickers dont l'univers sous-jacent est technologique / Nasdaq. Sert
+# uniquement à choisir la famille d'échelle (SP vs ND) pour les transpositions ;
+# un ticker inconnu retombe sur SP, qui n'a aucun effet sur son propre GEX.
+_ND_TICKERS = {
+    "QQQ", "TQQQ", "SQQQ", "SMH", "SOXX", "SOXL", "SOXS", "NVDA", "AMD",
+    "AVGO", "MU", "TSM", "AAPL", "MSFT", "AMZN", "META", "GOOGL", "TSLA",
+}
+
+
+def normalize_ticker(raw: str | None) -> str:
+    """Normalise un ticker saisi (majuscules, sans « $ ») et le valide.
+
+    Volontairement strict : le ticker part ensuite tel quel dans une URL CBOE.
+    Les indices CBOE (`_SPX`) ne sont pas acceptés ici — les cibles existantes
+    les couvrent déjà.
+    """
+    ticker = (raw or "").strip().upper().lstrip("$")
+    # Les points sont légitimes (BRK.B, BF.B) : l'endpoint CBOE les accepte
+    # tels quels, contrairement à la variante soulignée utilisée ailleurs.
+    if not re.fullmatch(r"[A-Z][A-Z0-9.]{0,9}", ticker):
+        raise ValueError("invalid ticker")
+    return ticker
+
+
+def _read_user_config() -> tuple[list[str], list[str]]:
+    """(cibles ajoutées, constituants surveillés) depuis data/tickers.json.
+
+    L'ancien format était une simple liste (ou {"targets": [...]}) : il reste
+    accepté, pour ne pas perdre les tickers déjà ajoutés.
+    """
+    try:
+        raw = json.loads(USER_TICKERS_FILE.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return [], []
+    except Exception:  # noqa: BLE001 — un fichier corrompu ne doit pas bloquer
+        log.warning("tickers.json unreadable — list ignored", exc_info=True)
+        return [], []
+    if isinstance(raw, list):
+        targets, watched = raw, []
+    elif isinstance(raw, dict):
+        targets, watched = raw.get("targets", []), raw.get("watched", [])
+    else:
+        return [], []
+
+    def clean(items) -> list[str]:
+        out = []
+        if not isinstance(items, list):
+            return out
+        for item in items:
+            try:
+                out.append(normalize_ticker(item))
+            except (TypeError, ValueError):
+                continue
+        return out
+
+    return clean(targets), clean(watched)
+
+
+def _save_user_tickers() -> None:
+    """Écriture atomique : le dashboard peut tourner pendant l'ajout."""
+    USER_TICKERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = USER_TICKERS_FILE.with_suffix(".json.tmp")
+    payload = json.dumps({
+        "targets": sorted(_USER_TICKERS),
+        "watched": sorted(_WATCHED),
+    }, indent=2) + "\n"
+    tmp.write_text(payload, encoding="utf-8")
+    os.replace(tmp, USER_TICKERS_FILE)
+
+
+def _guess_family(ticker: str) -> str:
+    return "ND" if ticker in _ND_TICKERS else "SP"
+
+
+def _load_user_tickers() -> None:
+    targets, watched = _read_user_config()
+    for ticker in targets:
+        if ticker in UNDERLYINGS:
+            continue
+        UNDERLYINGS[ticker] = Underlying(
+            ticker, ticker, ticker, family=_guess_family(ticker))
+        _USER_TICKERS.add(ticker)
+    for ticker in watched:
+        u = UNDERLYINGS.get(ticker)
+        if u is not None and u.enabled and u.role == "constituent":
+            _WATCHED.add(ticker)
+
+
+def add_target(raw: str) -> tuple[Underlying, bool]:
+    """Ajoute un ticker comme cible CBOE. Renvoie (underlying, créé).
+
+    `créé=False` si le ticker existe déjà (cible, constituant ou future) :
+    l'appelant décide alors du message à afficher, sans écraser le rôle.
+    """
+    ticker = normalize_ticker(raw)
+    with _TICKERS_LOCK:
+        existing = UNDERLYINGS.get(ticker)
+        if existing is not None:
+            return existing, False
+        u = Underlying(ticker, ticker, ticker, family=_guess_family(ticker))
+        UNDERLYINGS[ticker] = u
+        _USER_TICKERS.add(ticker)
+        _save_user_tickers()
+        return u, True
+
+
+def remove_target(ticker: str) -> bool:
+    """Retire un ticker AJOUTÉ par l'utilisateur (rollback ou suppression).
+
+    Ne touche jamais aux cibles statiques ni aux constituants.
+    """
+    ticker = ticker.strip().upper()
+    with _TICKERS_LOCK:
+        if ticker not in _USER_TICKERS:
+            return False
+        _USER_TICKERS.discard(ticker)
+        UNDERLYINGS.pop(ticker, None)
+        _save_user_tickers()
+        return True
+
+
+def watch_constituent(raw: str) -> tuple[Underlying, bool]:
+    """Affiche un constituant existant comme onglet, sans le re-collecter.
+
+    Renvoie (underlying, nouvellement_surveillé). Un ticker qui n'est pas un
+    constituant n'est pas transformé : l'appelant garde son rôle d'origine.
+    """
+    ticker = normalize_ticker(raw)
+    with _TICKERS_LOCK:
+        u = UNDERLYINGS.get(ticker)
+        if u is None:
+            raise KeyError(ticker)
+        if u.role != "constituent":
+            return u, False
+        if ticker in _WATCHED:
+            return u, False
+        _WATCHED.add(ticker)
+        _save_user_tickers()
+        return u, True
+
+
+def is_watched(ticker: str) -> bool:
+    with _TICKERS_LOCK:
+        return ticker in _WATCHED
+
+
+def selectable_underlyings() -> list[Underlying]:
+    """Onglets proposés : cibles + constituants explicitement surveillés.
+
+    `targets()` reste volontairement inchangé : un constituant surveillé ne
+    devient pas une échelle de transposition. Seul le sélecteur l'accueille.
+    """
+    with _TICKERS_LOCK:
+        out = [u for _, u in UNDERLYINGS.items()
+               if u.enabled and u.role == "target"]
+        for key in sorted(_WATCHED):
+            u = UNDERLYINGS.get(key)
+            if u is not None and u.enabled and u.role == "constituent":
+                out.append(u)
+        return out
+
+
+_load_user_tickers()
+
+
+def all_underlyings() -> list[tuple[str, Underlying]]:
+    """Copie thread-safe de UNDERLYINGS.
+
+    Un ticker peut être ajouté par un callback pendant que le scheduler
+    parcourt le dictionnaire : itérer directement lèverait « dictionary changed
+    size during iteration ». Tout parcours doit passer par cette copie.
+    """
+    with _TICKERS_LOCK:
+        return list(UNDERLYINGS.items())
+
+
 def targets() -> list[Underlying]:
     """Sous-jacents analysés — ceux que l'interface propose."""
-    return [u for u in UNDERLYINGS.values() if u.enabled and u.role == "target"]
+    return [u for _, u in all_underlyings() if u.enabled and u.role == "target"]
 
 
 def constituents(for_target: str | None = None) -> list[Underlying]:
@@ -158,7 +355,7 @@ def constituents(for_target: str | None = None) -> list[Underlying]:
 
     `for_target` restreint à ceux qui informent une cible donnée.
     """
-    out = [u for u in UNDERLYINGS.values()
+    out = [u for _, u in all_underlyings()
            if u.enabled and u.role == "constituent"]
     if for_target:
         out = [u for u in out if for_target in u.links]

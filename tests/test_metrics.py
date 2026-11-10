@@ -140,7 +140,9 @@ def test_regime_text_fr_et_en():
                             dex_history=pd.Series([-0.1e9] * 15 + [-0.5e9] * 5))
     fr = regime_text("fr", r)
     en = regime_text("en", r)
-    assert "haussier" in fr and "acheteuse" in fr
+    # English-only build: the language argument is kept for callers but both
+    # paths return the same English text.
+    assert fr == en
     assert "upward" in en and "buying" in en
 
 

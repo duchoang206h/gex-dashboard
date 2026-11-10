@@ -110,10 +110,10 @@ def reference_spot(symbol: str) -> float | None:
         return None
     try:
         spot, _ = ingest.fetch_index_spot(u.cboe_symbol)
-        log.info("%s : spot temps réel indisponible, repli sur le spot CBOE", symbol)
+        log.info("%s: real-time spot unavailable, falling back to CBOE spot", symbol)
         return float(spot)
     except Exception:  # noqa: BLE001 — un spot manquant n'est pas fatal
-        log.exception("%s : spot indisponible", symbol)
+        log.exception("%s: spot unavailable", symbol)
         return None
 
 
@@ -127,19 +127,19 @@ def build_native_chain(symbol: str, window: float = DEFAULT_WINDOW,
     _, _, access = quote_token()
     spot = reference_spot(symbol)
     if not spot:
-        log.warning("%s : spot indisponible, chaîne native abandonnée", symbol)
+        log.warning("%s: spot unavailable, native chain abandoned", symbol)
         return None
 
     chain = fetch_chain_instruments(symbol, access)
     chain = filter_chain(chain, spot, window, max_days)
     if chain.empty:
-        log.warning("%s : aucun contrat dans la fenêtre", symbol)
+        log.warning("%s: no contract in the window", symbol)
         return None
 
     raw = asyncio.run(_collect(chain["streamer_symbol"].tolist(),
                                stop_when_complete=True))
     # multiplicateur d'options d'INDICE (100), pas le notionnel d'un future
     df = enrich_native(chain, raw, spot, CONTRACT_MULTIPLIER)
-    log.info("%s : chaîne d'indice native — %d contrats, spot %.2f",
+    log.info("%s: native index chain — %d contracts, spot %.2f",
              symbol, len(df), spot)
     return df

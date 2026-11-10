@@ -56,7 +56,7 @@ def tick_bars(ticks: pd.DataFrame, n_ticks: int) -> pd.DataFrame:
     """Une barre = `n_ticks` prints consécutifs (la dernière peut être
     incomplète, incluse quand même — mieux que perdre les derniers prints)."""
     if n_ticks < 1:
-        raise ValueError("n_ticks doit être >= 1")
+        raise ValueError("n_ticks must be >= 1")
     df = _clean_ticks(ticks)
     rows = df.to_dict("records")
     bars = [_finish_bar(rows[i:i + n_ticks]) for i in range(0, len(rows), n_ticks)]
@@ -67,7 +67,7 @@ def volume_bars(ticks: pd.DataFrame, bar_volume: float) -> pd.DataFrame:
     """Une barre se clôt dès que le volume cumulé atteint `bar_volume`
     contrats — peut regrouper peu de gros prints ou beaucoup de petits."""
     if bar_volume <= 0:
-        raise ValueError("bar_volume doit être > 0")
+        raise ValueError("bar_volume must be > 0")
     df = _clean_ticks(ticks)
     bars, cur, cur_vol = [], [], 0.0
     for row in df.to_dict("records"):
@@ -86,7 +86,7 @@ def range_bars(ticks: pd.DataFrame, bar_range: float) -> pd.DataFrame:
     l'ouverture de la barre (dans un sens OU l'autre) — seule construction où
     la taille de barre dépend du PRIX, pas de l'activité."""
     if bar_range <= 0:
-        raise ValueError("bar_range doit être > 0")
+        raise ValueError("bar_range must be > 0")
     df = _clean_ticks(ticks)
     bars, cur = [], []
     for row in df.to_dict("records"):
@@ -111,7 +111,7 @@ def zigzag(bars: pd.DataFrame, min_move: float,
     chronologique. Le DERNIER point est provisoire (pas encore confirmé par un
     retracement) — à l'appelant de décider s'il veut le garder."""
     if min_move <= 0:
-        raise ValueError("min_move doit être > 0")
+        raise ValueError("min_move must be > 0")
     if bars.empty:
         return pd.DataFrame(columns=["ts", "price", "kind"])
 

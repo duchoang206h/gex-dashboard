@@ -110,11 +110,11 @@ async def _serve(tape: FlowTape, host, port: int, ticks=None) -> None:
             except OSError as exc:
                 # p. ex. Tailscale pas encore monté au démarrage du PC : on ne
                 # renonce pas à la capture pour une adresse indisponible
-                log.warning("Liaison capture : impossible d'écouter sur %s:%d (%s)",
+                log.warning("Capture link: cannot listen on %s:%d (%s)",
                             h, port, exc)
         if not ecoutes:
-            raise RuntimeError("liaison capture : aucune adresse d'écoute disponible")
-        log.info("Liaison capture : écoute sur %s",
+            raise RuntimeError("capture link: no listening address available")
+        log.info("Capture link: listening on %s",
                  ", ".join(f"ws://{h}:{port}" for h in ecoutes))
         await asyncio.Future()                     # tourne indéfiniment
 
@@ -174,7 +174,7 @@ class RemoteTape:
                 asyncio.run(self._session())
                 backoff = BACKOFF_START
             except Exception as exc:  # noqa: BLE001 — la liaison doit survivre à tout
-                log.warning("Liaison capture interrompue (%s) — reprise dans %.0f s",
+                log.warning("Capture link interrupted (%s) — resuming in %.0f s",
                             exc, backoff)
                 time.sleep(backoff)
                 backoff = min(backoff * 2, BACKOFF_MAX)
@@ -183,10 +183,10 @@ class RemoteTape:
         import websockets
         async with websockets.connect(self.url, max_size=MAX_MESSAGE,
                                       ping_interval=20, ping_timeout=20) as ws:
-            log.info("Liaison capture : connecté à %s", self.url)
+            log.info("Capture link: connected to %s", self.url)
             async for raw in ws:
                 self.apply(json.loads(raw))
-        raise ConnectionError("liaison fermée par la capture")
+        raise ConnectionError("connection closed by capture")
 
     # -- application d'un message (testable sans réseau) -----------------
 

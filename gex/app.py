@@ -1,7 +1,7 @@
 """Dashboard Dash : GEX/DEX par strike, indicateurs, flux delta, skew IV.
 
 Palette : polarité (GEX/flux +/-) en diverging bleu↔rouge, identité
-(calls/puts, expirations) sur les slots catégoriels — thème sombre.
+(calls/puts, expirations) sur les slots catégoriels — thème clair.
 Interface FR/EN (gex/i18n.py) ; termes de trading standards dans les deux.
 """
 from __future__ import annotations
@@ -12,6 +12,7 @@ import re
 import threading
 import time
 from collections import deque
+from contextvars import ContextVar
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -26,12 +27,15 @@ from . import digest, metrics, scales, scalp, store
 from .bars import swing_move, volume_bars, zigzag
 from .api import _futures_last_price, register_api
 from .tt_web import connection_status, register_oauth
-from .config import SETTINGS, UNDERLYINGS, targets
-from .i18n import LANGS, regime_text, t, wall_labels
+from .config import (SETTINGS, UNDERLYINGS, add_target, all_underlyings,
+                     normalize_ticker, remove_target, selectable_underlyings,
+                     watch_constituent)
+from .i18n import regime_text, t, wall_labels
+from .ingest import fetch_chain
 from .metrics import ET, EXPIRY_BUCKETS
 from . import idxopt
 from .rtquote import PUBLIC_QUOTES, QUOTES, credentials_present
-from .scheduler import STATE, market_is_open
+from .scheduler import STATE, ingest_snapshot, market_is_open
 
 try:
     # gex/confluence.py est délibérément HORS GIT (.git/info/exclude, choix
@@ -45,29 +49,72 @@ except ImportError:
     _confluence = None
 from .scheduler import native_index_key as scheduler_native_key
 
-# --- Palette (mode sombre, cf. skill dataviz) ---
+# --- Palettes (thème clair / sombre) ---
 log = logging.getLogger(__name__)
 
-C = {
-    "surface": "#1a1a19",
-    "page": "#0d0d0d",
-    "ink": "#ffffff",
-    "ink2": "#c3c2b7",
-    "muted": "#898781",
-    "grid": "#2c2c2a",
-    "axis": "#383835",
-    "pos": "#3987e5",   # GEX positif / flux acheteur (bleu)
-    "neg": "#e66767",   # GEX négatif / flux vendeur (rouge)
-    "spot": "#ffffff",
-    "zg": "#c98500",    # jaune sombre — Gamma Flip
-    "lvl": "#9085e9",   # violet — niveaux GEX 0DTE
-    "hvl": "#199e70",   # aqua — HVL (bascule pondérée par le volume du jour)
-    "cw": "#3987e5",    # bleu — Call Wall (résistance, au-dessus du spot)
-    "ps": "#e66767",    # rouge — Put Support (support, sous le spot)
-    "d1": "#898781",    # gris — bornes 1D Min / 1D Max (move attendu)
-    "ok": "#199e70",    # vert — donnée temps réel
-    "cat": ["#3987e5", "#d95926", "#199e70", "#c98500"],  # slots 1-4
+# Le thème est choisi par requête (cookie gex_theme) : Dash régénère les
+# figures à chaque callback, donc un ContextVar suffit — inutile de muter un
+# dict global, ce qui mélangerait les thèmes entre deux threads waitress.
+_PALETTES = {
+    "light": {
+        "surface": "#f7f7f4",
+        "page": "#f2f2f0",
+        "ink": "#111827",
+        "ink2": "#374151",
+        "muted": "#6b7280",
+        "grid": "#e4e2dc",
+        "axis": "#d3d0c8",
+        "pos": "#2563eb",       # GEX positif / flux acheteur (bleu)
+        "neg": "#dc2626",       # GEX négatif / flux vendeur (rouge)
+        "pos_soft": "#60a5fa",  # volume / jambes secondaires
+        "neg_soft": "#f87171",
+        "spot": "#111827",
+        "zg": "#b45309",        # ambre — Gamma Flip
+        "lvl": "#7c3aed",       # violet — niveaux GEX 0DTE
+        "hvl": "#047857",       # vert — HVL
+        "cw": "#2563eb",        # bleu — Call Wall
+        "ps": "#dc2626",        # rouge — Put Support
+        "d1": "#6b7280",        # gris — bornes 1D Min / 1D Max
+        "ok": "#047857",
+        "chip": "rgba(0,0,0,0.06)",
+        "cat": ["#2563eb", "#ea580c", "#047857", "#b45309"],
+    },
+    "dark": {
+        # Sombre doux, pas noir pur : moins de contraste brutal le soir.
+        "surface": "#1f2228",
+        "page": "#16181d",
+        "ink": "#e8e6e1",
+        "ink2": "#c7c4bd",
+        "muted": "#8e8b84",
+        "grid": "#33373f",
+        "axis": "#474c56",
+        "pos": "#7aa2f7",
+        "neg": "#f28b82",
+        "pos_soft": "#93c5fd",
+        "neg_soft": "#fca5a5",
+        "spot": "#e8e6e1",
+        "zg": "#e0af68",
+        "lvl": "#b4a7f5",
+        "hvl": "#7fd1a9",
+        "cw": "#7aa2f7",
+        "ps": "#f28b82",
+        "d1": "#9a968e",
+        "ok": "#7fd1a9",
+        "chip": "rgba(255,255,255,0.08)",
+        "cat": ["#7aa2f7", "#f0a46b", "#7fd1a9", "#e0af68"],
+    },
 }
+CURRENT_THEME: ContextVar[str] = ContextVar("gex_theme", default="light")
+
+
+class _Palette:
+    """Accès à la palette du thème de la requête courante."""
+
+    def __getitem__(self, key: str):
+        return _PALETTES[CURRENT_THEME.get()][key]
+
+
+C = _Palette()
 
 FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif'
 
@@ -77,12 +124,12 @@ LOCAL_TZ = datetime.now().astimezone().tzinfo
 BUCKET_KEYS = {"0DTE": "bucket_0DTE", "Semaine": "bucket_week",
                "Mois": "bucket_month", "Tout": "bucket_all"}
 
-TAB_STYLE = {"backgroundColor": "#0d0d0d", "color": "#898781",
-             "border": "1px solid #2c2c2a", "padding": "8px 14px", "fontSize": "13px"}
-TAB_SELECTED = {"backgroundColor": "#1a1a19", "color": "#ffffff",
-                "border": "1px solid #2c2c2a", "borderTop": "2px solid #3987e5",
+TAB_STYLE = {"backgroundColor": "#f2f2f0", "color": "#6b7280",
+             "border": "1px solid #dddbd4", "padding": "8px 14px", "fontSize": "13px"}
+TAB_SELECTED = {"backgroundColor": "#f7f7f4", "color": "#111827",
+                "border": "1px solid #dddbd4", "borderTop": "2px solid #2563eb",
                 "padding": "8px 14px", "fontSize": "13px", "fontWeight": "600"}
-HINT_STYLE = {"color": "#898781", "fontSize": "11px", "marginBottom": "8px"}
+HINT_STYLE = {"color": "#6b7280", "fontSize": "11px", "marginBottom": "8px"}
 TABS = ("main", "profile", "greeks2", "heat", "pos", "tape")
 
 
@@ -207,7 +254,7 @@ def time_range_selector() -> dict:
                 dict(count=7, label="1S", step="day", stepmode="backward"),
                 dict(count=1, label="1M", step="month", stepmode="backward"),
                 dict(count=3, label="3M", step="month", stepmode="backward"),
-                dict(step="all", label="Tout"),
+                dict(step="all", label="All"),
             ],
             bgcolor=C["surface"], activecolor=C["axis"],
             bordercolor=C["grid"], borderwidth=1,
@@ -331,6 +378,29 @@ def _bar_width(strikes: np.ndarray) -> float:
     return float(np.median(diffs)) * 0.75 if len(diffs) else 1.0
 
 
+def money_unit(value: float) -> tuple[str, float, int]:
+    """Unité monétaire lisible pour une valeur en dollars.
+
+    Un ETF comme SOXL a un GEX par strike de quelques millions de dollars :
+    arrondi en $Bn il vaut 0.00. On adapte donc l'unité à la magnitude au lieu
+    d'afficher des zéros trompeurs.
+    """
+    a = abs(value)
+    if a >= 1e9:
+        return "$Bn", 1e9, 2
+    if a >= 1e6:
+        return "$M", 1e6, 2
+    if a >= 1e3:
+        return "$K", 1e3, 1
+    return "$", 1.0, 0
+
+
+def fmt_money(value: float, signed: bool = False) -> str:
+    unit, div, digits = money_unit(value)
+    num = f"{value / div:+.{digits}f}" if signed else f"{value / div:.{digits}f}"
+    return f"{num} {unit}"
+
+
 def exposure_fig(df: pd.DataFrame, spot: float, zg: float | None, col: str, title: str,
                  lang: str, levels: pd.DataFrame | None = None, hvl: float | None = None,
                  window: float = 0.04, xf=None,
@@ -342,7 +412,9 @@ def exposure_fig(df: pd.DataFrame, spot: float, zg: float | None, col: str, titl
     agg = metrics.exposure_by_strike(d, col)
     if agg.empty:
         return empty_fig(t(lang, "no_data_window"), title)
-    net = agg["net"].to_numpy() / 1e9
+    peak = float(np.nanmax(np.abs(agg[["net", "C", "P"]].to_numpy())))
+    unit, div, digits = money_unit(peak)
+    net = agg["net"].to_numpy() / div
     strikes = xf(agg["strike"].to_numpy())
     spot = xf(spot)
     zg = xf(zg) if zg is not None else None
@@ -354,16 +426,19 @@ def exposure_fig(df: pd.DataFrame, spot: float, zg: float | None, col: str, titl
             y=strikes, x=net, orientation="h",
             width=_bar_width(strikes),
             marker=dict(color=colors, line=dict(width=0)),
-            customdata=np.stack([agg["C"] / 1e9, agg["P"] / 1e9], axis=-1),
+            customdata=np.stack([agg["C"] / div, agg["P"] / div], axis=-1),
             hovertemplate=(
-                f"{t(lang, 'hover_strike')} %{{y}}<br>{t(lang, 'hover_net')}: %{{x:.2f}} $Bn"
-                "<br>Calls: %{customdata[0]:.2f} $Bn"
-                "<br>Puts: %{customdata[1]:.2f} $Bn<extra></extra>"
+                f"{t(lang, 'hover_strike')} %{{y}}<br>{t(lang, 'hover_net')}: "
+                f"%{{x:.{digits}f}} {unit}"
+                f"<br>Calls: %{{customdata[0]:.{digits}f}} {unit}"
+                f"<br>Puts: %{{customdata[1]:.{digits}f}} {unit}<extra></extra>"
             ),
         )
     )
     fig.update_layout(**base_layout(title, height=560))
-    fig.update_xaxes(title_text=t(lang, "axis_bn_per_move"), title_font=dict(color=C["muted"]))
+    axis_key = "axis_money_per_pt" if col == "dex" else "axis_money_per_move"
+    fig.update_xaxes(title_text=t(lang, axis_key, unit=unit),
+                     title_font=dict(color=C["muted"]))
     # Niveaux répartis entre les deux graphiques pour ne pas surcharger :
     #   "walls"  (GEX) : murs de gamma — c'est là qu'ils se lisent
     #   "regime" (DEX) : bascules de régime et bornes de move attendu
@@ -473,7 +548,7 @@ def heatmap_fig(symbol: str, lang: str, day: str | None = None,
     # coup d'œil sur un même strike.
     for serie, name, width, colors in (
         (oi, t(lang, "legend_gex_oi"), 0.75, (C["pos"], C["neg"])),
-        (vol, t(lang, "legend_gex_vol"), 0.38, ("#7fb2ee", "#f0a1a1")),
+        (vol, t(lang, "legend_gex_vol"), 0.38, (C["pos_soft"], C["neg_soft"])),
     ):
         if serie.empty:
             continue
@@ -509,7 +584,7 @@ def heatmap_fig(symbol: str, lang: str, day: str | None = None,
         else:
             fig.add_scatter(x=ts, y=_id(path["close"].to_numpy()),
                             mode="lines", name=t(lang, "legend_spot"),
-                            line=dict(color="#22d3ee", width=1.3),
+                            line=dict(color=C["spot"], width=1.3),
                             hovertemplate=(f"%{{x|%H:%M}}<br>{t(lang, 'legend_spot')}"
                                            " %{y:.0f}<extra></extra>"))
 
@@ -955,8 +1030,8 @@ def hedge_fig(symbol: str, lang: str, window_min: int = 15,
     fig = go.Figure()
     # 4 courbes de cumul par catégorie (mêmes couleurs que les anciennes barres)
     # + la courbe BLANCHE du net ; toutes en marches : un print = un cran
-    spec = (("hedge_leg_call_buy", C["pos"]), ("hedge_leg_put_sell", "#8dbbf0"),
-            ("hedge_leg_put_buy", C["neg"]), ("hedge_leg_call_sell", "#f0a3a3"))
+    spec = (("hedge_leg_call_buy", C["pos"]), ("hedge_leg_put_sell", C["pos_soft"]),
+            ("hedge_leg_put_buy", C["neg"]), ("hedge_leg_call_sell", C["neg_soft"]))
     for (key, color), y in zip(spec, cats):
         fig.add_scatter(x=ts, y=y, mode="lines", name=t(lang, key),
                         line=dict(color=color, width=1.4, shape="hv"),
@@ -1032,12 +1107,12 @@ def scalp_v2_hedge_data(symbol: str, window_min: int, day: str) -> dict:
     # affiche déjà dans le fuseau du NAVIGATEUR (même logique que les
     # bougies de scalp_v2_chart_data).
     epoch = _epoch_seconds(pd.Series(ts).dt.tz_localize(LOCAL_TZ)).to_numpy()
-    spec = (("Calls achetés", "#3987e5"), ("Puts vendus", "#8dbbf0"),
-            ("Puts achetés", "#e66767"), ("Calls vendus", "#f0a3a3"))
+    spec = (("Calls bought", C["pos"]), ("Puts sold", C["pos_soft"]),
+            ("Puts bought", C["neg"]), ("Calls sold", C["neg_soft"]))
     series = [{"name": name, "color": color,
               "points": [{"time": int(e), "value": float(v)} for e, v in zip(epoch, y)]}
              for (name, color), y in zip(spec, cats)]
-    series.append({"name": "Net cumulé", "color": "#ffffff", "width": 3,
+    series.append({"name": "Cumulative net", "color": C["ink"], "width": 3,
                    "points": [{"time": int(e), "value": float(v)} for e, v in zip(epoch, cum)]})
     return {"series": series}
 
@@ -1078,7 +1153,7 @@ def _journal():
         import journal
         _JOURNAL_CONN = journal.connect(SETTINGS.data_dir / "journal" / "journal.sqlite")
     except Exception:  # noqa: BLE001 — le journal ne doit jamais casser la page
-        log.exception("Journal des signaux /scalp indisponible")
+        log.exception("Scalp signal journal unavailable")
         _JOURNAL_CONN = False
     return _JOURNAL_CONN or None
 
@@ -1119,7 +1194,7 @@ def log_scalp_signal(symbol: str, a: dict, spot: float, move: float | None,
                 spot=spot, move_pts=move, net_musd=net, gross_musd=gross, basis=basis)
         _SCALP_SIGNAL_LAST_LOGGED[key] = (state, direction, now_epoch)
     except Exception:  # noqa: BLE001 — ne doit jamais casser le bandeau
-        log.exception("Écriture du signal /scalp échouée (%s, %s, %s)", symbol, state, basis)
+        log.exception("Failed to write /scalp signal (%s, %s, %s)", symbol, state, basis)
 
 
 # Salves d'absorption déjà journalisées par symbole (leur `ts` = fin de salve),
@@ -1156,7 +1231,7 @@ def log_absorption_levels(symbol: str, recent: list[dict]) -> None:
                     hvl_price=hvl.get("price"), hvl_delta=hvl.get("delta"),
                     hvl_side=hvl.get("side"))
         except Exception:  # noqa: BLE001 — ne doit jamais casser le bandeau
-            log.exception("Écriture de l'absorption /scalp échouée (%s, %.2f)",
+            log.exception("Failed to write /scalp absorption (%s, %.2f)",
                           symbol, a["price"])
 
 
@@ -1386,7 +1461,7 @@ def scalp_banner(symbol: str, ctx: dict, spot: float, lang: str,
 def scalp_ladder(symbol: str, ctx: dict, spot: float) -> html.Div:
     rungs = scalp.build_ladder(symbol, spot, ctx["zg"], ctx["hvl"], ctx["keys"], ctx["walls"])
     if not rungs:
-        return html.Div("Niveaux indisponibles", className="hint")
+        return html.Div("Levels unavailable", className="hint")
     haut, bas = scalp.nearest(rungs)
     rows, spot_placed = [], False
     spot_row = html.Div([html.Span("SPOT", className="sc-name"),
@@ -1488,11 +1563,11 @@ def scalp_price_fig(symbol: str, ctx: dict, spot: float, minutes: int = 180) -> 
         if days:
             day = days[-1]
             bars = _load_prices_cached(symbol, day)
-            title += f" · dernier jour disponible ({day})"
+            title += f" · last available session ({day})"
             # hors séance : on montre la séance US (jusqu'à la clôture 16h ET), pas la nuit
             bars = bars[pd.to_datetime(bars["timestamp"]) <= pd.Timestamp(f"{day} 16:00")]
     if bars.empty:
-        return empty_fig("Pas de bougies disponibles.", title)
+        return empty_fig("No candles available.", title)
     ts = pd.to_datetime(bars["timestamp"])
     bars = bars[ts >= ts.iloc[-1] - pd.Timedelta(minutes=minutes)]
     if day == today:
@@ -1963,27 +2038,27 @@ def _refresh_scalp_indicators() -> None:
         try:
             ctx = scalp_context(symbol)
         except Exception:  # noqa: BLE001
-            log.exception("Rafraîchissement planifié scalp_context échoué (%s)", symbol)
+            log.exception("Scheduled scalp_context refresh failed (%s)", symbol)
         day_ticks = pd.DataFrame()
         try:
             day_ticks = _scalp_day_ticks(symbol)
         except Exception:  # noqa: BLE001
-            log.exception("Rafraîchissement planifié ticks du jour échoué (%s)", symbol)
+            log.exception("Scheduled intraday ticks refresh failed (%s)", symbol)
         try:
             scalp_order_flow_zones(symbol, day_ticks)
             scalp_orderflow_profile(symbol, day_ticks)
         except Exception:  # noqa: BLE001
-            log.exception("Rafraîchissement planifié order-flow échoué (%s)", symbol)
+            log.exception("Scheduled order-flow refresh failed (%s)", symbol)
         try:
             scalp_confluence_zones(symbol)
         except Exception:  # noqa: BLE001
-            log.exception("Rafraîchissement planifié confluence échoué (%s)", symbol)
+            log.exception("Scheduled confluence refresh failed (%s)", symbol)
         if ctx is not None:
             try:
                 spot = _scalp_live_spot(symbol, ctx)
                 scalp_gex_profile(symbol, spot)
             except Exception:  # noqa: BLE001
-                log.exception("Rafraîchissement planifié profil gamma échoué (%s)", symbol)
+                log.exception("Scheduled gamma profile refresh failed (%s)", symbol)
 
 
 _SCALP_INDICATOR_SCHED = None
@@ -2112,13 +2187,13 @@ def _scalp_indicator_snapshot(symbol: str, ctx: dict, spot: float,
     try:
         gex_profile = scalp_gex_profile(symbol, spot)
     except Exception:  # noqa: BLE001 — un profil raté ne doit jamais casser le graphique
-        log.exception("Profil gamma /scalp v2 indisponible (%s)", symbol)
+        log.exception("Scalp v2 gamma profile unavailable (%s)", symbol)
         gex_profile = []
     order_flow = scalp_order_flow_zones(symbol, day_ticks)
     try:
         orderflow_profile = scalp_orderflow_profile(symbol, day_ticks)
     except Exception:  # noqa: BLE001 — un profil raté ne doit jamais casser le graphique
-        log.exception("Profil order-flow par jambe /scalp v2 indisponible (%s)", symbol)
+        log.exception("Scalp v2 per-leg order-flow profile unavailable (%s)", symbol)
         orderflow_profile = {"legs": [], "untested": []}
     return {"levels": levels, "confluence": confluence, "order_flow": order_flow,
            "gex_profile": gex_profile, "orderflow_profile": orderflow_profile}
@@ -2330,19 +2405,24 @@ def flow_fig(symbol: str, lang: str, day: str | None = None) -> go.Figure:
 
 
 def history_fig(symbol: str, lang: str) -> go.Figure:
-    title = guided(t(lang, "hist_title"), "history")
     hist = store.load_history(symbol)
+    peak = (float(np.nanmax(np.abs(hist["net_gex"].to_numpy())))
+            if not hist.empty and "net_gex" in hist else 0.0)
+    unit, div, digits = money_unit(peak)
+    title = guided(t(lang, "hist_title", unit=unit), "history")
     if hist.empty or len(hist) < 2:
         return empty_fig(t(lang, "not_enough_history"), title)
     ts = to_local(hist["timestamp"])
     fig = go.Figure()
-    fig.add_scatter(x=ts, y=hist["net_gex"] / 1e9, mode="lines", name="GEX",
+    fig.add_scatter(x=ts, y=hist["net_gex"] / div, mode="lines", name="GEX",
                     line=dict(color=C["cat"][0], width=2),
-                    hovertemplate="%{x|%d/%m %H:%M}<br>GEX: %{y:.1f} $Bn<extra></extra>")
+                    hovertemplate=(f"%{{x|%d/%m %H:%M}}<br>GEX: "
+                                   f"%{{y:.{digits}f}} {unit}<extra></extra>"))
     lay = base_layout(title, height=300)
     lay["margin"]["t"] = 62
     fig.update_layout(**lay)
     fig.update_xaxes(**time_range_selector(), range=default_window(ts))
+    fig.update_yaxes(title_text=f"{unit} / 1%", title_font=dict(color=C["muted"]))
     return fig
 
 
@@ -2394,24 +2474,28 @@ def profile_fig(df: pd.DataFrame, spot: float, zg: float | None, lang: str,
                 window: float, xf=None) -> go.Figure:
     """Courbe de GEX net en fonction d'un spot hypothétique."""
     xf = xf or (lambda v: v)
-    title = guided(t(lang, "profile_title"), "profile")
     res = metrics.gamma_profile(df, spot, range_pct=window, steps=201)
     if res is None:
-        return empty_fig(t(lang, "no_data_window"), title)
+        return empty_fig(t(lang, "no_data_window"),
+                         guided(t(lang, "profile_title", unit="$Bn"), "profile"))
     grid, prof = res
+    unit, div, digits = money_unit(float(np.nanmax(np.abs(prof))))
+    title = guided(t(lang, "profile_title", unit=unit), "profile")
     x = xf(grid)
-    y = prof / 1e9
+    y = prof / div
     fig = go.Figure()
     # deux traces pour colorer par polarité sans trompe-l'œil sur l'axe
     fig.add_scatter(x=x, y=np.where(y >= 0, y, np.nan), mode="lines",
                     line=dict(color=C["pos"], width=2), name="GEX +",
-                    hovertemplate="%{x:.0f}<br>%{y:.1f} $Bn<extra></extra>")
+                    hovertemplate=(f"%{{x:.0f}}<br>%{{y:.{digits}f}} "
+                                   f"{unit}<extra></extra>"))
     fig.add_scatter(x=x, y=np.where(y < 0, y, np.nan), mode="lines",
                     line=dict(color=C["neg"], width=2), name="GEX −",
-                    hovertemplate="%{x:.0f}<br>%{y:.1f} $Bn<extra></extra>")
+                    hovertemplate=(f"%{{x:.0f}}<br>%{{y:.{digits}f}} "
+                                   f"{unit}<extra></extra>"))
     fig.update_layout(**base_layout(title, height=420))
     fig.update_xaxes(title_text=t(lang, "profile_axis"), title_font=dict(color=C["muted"]))
-    fig.update_yaxes(title_text="$Bn / 1%", title_font=dict(color=C["muted"]))
+    fig.update_yaxes(title_text=f"{unit} / 1%", title_font=dict(color=C["muted"]))
     fig.add_hline(y=0, line_color=C["axis"], line_width=1)
     # Lignes verticales : étiquettes tournées pour courir LE LONG de la ligne.
     # À l'horizontale, elles débordent latéralement et se chevauchent dès que
@@ -2436,27 +2520,30 @@ def profile_by_expiry_fig(df: pd.DataFrame, spot: float, lang: str,
     title = guided(t(lang, "profile_by_exp"), "profile")
     xf = xf or (lambda v: v)
     today = datetime.now(ET).date()
-    fig = go.Figure()
-    drawn = 0
-    for i, bucket in enumerate(EXPIRY_BUCKETS):
+    curves: list[tuple[str, np.ndarray, np.ndarray]] = []
+    for bucket in EXPIRY_BUCKETS:
         sub = df[metrics.bucket_mask(df, bucket, today)]
         res = metrics.gamma_profile(sub, spot, range_pct=window, steps=201)
-        if res is None:
-            continue
-        grid, prof = res
-        fig.add_scatter(x=xf(grid), y=prof / 1e9, mode="lines",
+        if res is not None:
+            curves.append((bucket, *res))
+    if not curves:
+        return empty_fig(t(lang, "no_data_window"), title)
+    peak = max(float(np.nanmax(np.abs(prof))) for _b, _g, prof in curves)
+    unit, div, digits = money_unit(peak)
+    fig = go.Figure()
+    for i, (bucket, grid, prof) in enumerate(curves):
+        fig.add_scatter(x=xf(grid), y=prof / div, mode="lines",
                         name=t(lang, BUCKET_KEYS[bucket]),
                         line=dict(color=C["cat"][i % 4], width=2),
-                        hovertemplate="%{x:.0f}<br>%{y:.1f} $Bn<extra></extra>")
-        drawn += 1
-    if drawn == 0:
-        return empty_fig(t(lang, "no_data_window"), title)
+                        hovertemplate=(f"%{{x:.0f}}<br>%{{y:.{digits}f}} "
+                                       f"{unit}<extra></extra>"))
     lay = base_layout(title, height=340)
     lay = with_legend(lay)
     fig.update_layout(**lay)
     fig.add_hline(y=0, line_color=C["axis"], line_width=1)
     fig.add_vline(x=xf(spot), line_color=C["spot"], line_dash="dot", line_width=1)
     fig.update_xaxes(title_text=t(lang, "profile_axis"), title_font=dict(color=C["muted"]))
+    fig.update_yaxes(title_text=f"{unit} / 1%", title_font=dict(color=C["muted"]))
     return fig
 
 
@@ -2517,7 +2604,7 @@ def oi_change_fig(chg: pd.DataFrame, spot: float, lang: str, prev_day: str,
     fig.add_hline(y=xf(spot), line_color=C["spot"], line_dash="dot", line_width=1,
                   annotation_text=f"Spot {xf(spot):.0f}", annotation_font_color=C["ink"],
                   annotation_position="top right")
-    fig.update_xaxes(title_text="Δ OI (milliers de contrats)", title_font=dict(color=C["muted"]))
+    fig.update_xaxes(title_text="Δ OI (thousands of contracts)", title_font=dict(color=C["muted"]))
     return fig
 
 
@@ -2528,7 +2615,7 @@ def _transform_for(symbol: str, scale_key: str | None):
     SPX vers NQ suppose de connaître le spot NDX et son basis.
     """
     spots, bases = {}, {}
-    for key in UNDERLYINGS:
+    for key, _u in all_underlyings():
         st = STATE.get(key)
         with STATE.lock:
             summ = st.summary
@@ -2548,7 +2635,7 @@ def _transform_for(symbol: str, scale_key: str | None):
     # Marché fermé, on garde donc le basis de parité call-put du dernier pull,
     # qui est un vrai coût de portage et reste stable.
     if market_is_open():
-        for u in UNDERLYINGS.values():
+        for _key, u in all_underlyings():
             if not u.future:
                 continue
             idx, fut = QUOTES.price(u.key), QUOTES.price(u.future)
@@ -2760,14 +2847,14 @@ def build_cards(symbol: str, lang: str, xf=None, scale: str | None = None) -> li
         card(t(lang, "card_spot_rt") if is_live else t(lang, "card_spot"),
              f"{display_spot:,.0f}", spot_sub,
              accent=C["ok"] if is_live else None),
-        card(t(lang, "card_net_gex"), f"{net_gex / 1e9:+.1f} $Bn",
+        card(t(lang, "card_net_gex"), fmt_money(net_gex, signed=True),
              t(lang, "stabilizing") if net_gex >= 0 else t(lang, "destabilizing"),
              accent=gex_color),
-        card(t(lang, "card_net_dex"), f"{s.net_dex / 1e9:+.1f} $Bn",
+        card(t(lang, "card_net_dex"), fmt_money(s.net_dex, signed=True),
              t(lang, "dex_long") if s.net_dex >= 0 else t(lang, "dex_short"),
              accent=C["pos"] if s.net_dex >= 0 else C["neg"]),
         card(t(lang, "card_zero_gamma"), zg_txt, zg_sub, accent=C["zg"]),
-        card(t(lang, "card_gex_0dte"), f"{s.net_gex_0dte / 1e9:+.1f} $Bn"),
+        card(t(lang, "card_gex_0dte"), fmt_money(s.net_gex_0dte, signed=True)),
         card(t(lang, "card_pc_oi"), f"{s.pc_oi:.2f}"),
         card(t(lang, "card_pc_vol"), f"{s.pc_volume:.2f}"),
     ]
@@ -2781,7 +2868,7 @@ CHART_NAMES = ("gex", "dex", "heatmap", "flow", "gflow", "tape", "history",
                "spotzg", "smile", "profile", "profile_exp", "vanna", "charm", "oi")
 
 
-def _figure_for(symbol: str, name: str, lang: str = "fr", bucket: str = "Tout",
+def _figure_for(symbol: str, name: str, lang: str = "en", bucket: str = "Tout",
                 window: float | None = None, scale: str | None = None) -> go.Figure | None:
     """Reconstruit un graphique hors du contexte Dash. `bucket` (échéance :
     0DTE / Semaine / Mois / Tout), `window` (concentration, ex. 0.02) et `scale`
@@ -2861,11 +2948,11 @@ def _figure_for(symbol: str, name: str, lang: str = "fr", bucket: str = "Tout",
     return None
 
 
-def chart_png(symbol: str, name: str, lang: str = "fr", bucket: str = "Tout",
+def chart_png(symbol: str, name: str, lang: str = "en", bucket: str = "Tout",
               window: float | None = None, scale: str | None = None) -> bytes | None:
     """PNG d'un graphique, ou None si indisponible. `bucket`/`window`/`scale`
     réglables (échéance, concentration, échelle d'affichage). Fond opaque (le
-    thème sombre a un fond transparent par défaut, illisible dans Discord)."""
+    thème clair a un fond transparent par défaut, illisible dans Discord)."""
     fig = _figure_for(symbol, name, lang, bucket, window, scale)
     if fig is None:
         return None
@@ -2888,7 +2975,33 @@ def create_app() -> Dash:
     # dans le sous-arbre RENVOYÉ par refresh_scalp — absent de app.layout au
     # démarrage. Sans ceci, Dash refuse l'enregistrement du callback.
     app.config.suppress_callback_exceptions = True
-    enabled = targets()
+    # Pose data-theme AVANT la feuille de style : évite un flash clair quand
+    # l'utilisateur a choisi le thème sombre (cookie lisible par Flask).
+    app.index_string = """<!DOCTYPE html>
+<html lang="en">
+<head>
+{%metas%}
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{%title%}</title>
+{%favicon%}
+<script>
+(function () {
+  var m = document.cookie.match(/(?:^|; )gex_theme=(dark|light)/);
+  document.documentElement.dataset.theme = m ? m[1] : 'light';
+})();
+</script>
+{%css%}
+</head>
+<body>
+{%app_entry%}
+<footer>
+{%config%}
+{%scripts%}
+{%renderer%}
+</footer>
+</body>
+</html>"""
+    enabled = selectable_underlyings()
 
     # Log d'accès TEMPORAIRE (2026-10-05, ~10h ET lundi) — diagnostic de la
     # saturation de connexions en pleine heure de marché (200 ESTABLISHED,
@@ -2900,8 +3013,15 @@ def create_app() -> Dash:
     @app.server.before_request
     def _log_access():
         from flask import request
-        log.info("ACCESS %s %s depuis %s", request.method, request.path,
+        log.info("ACCESS %s %s from %s", request.method, request.path,
                  request.headers.get("X-Forwarded-For", request.remote_addr))
+
+    @app.server.before_request
+    def _theme_from_cookie():
+        """Choisit la palette pour CETTE requête (layout, callback, export)."""
+        from flask import request
+        theme = request.cookies.get("gex_theme", "light")
+        CURRENT_THEME.set(theme if theme in _PALETTES else "light")
 
     def ctl(label_id, control):
         """Contrôle étiqueté : la légende dit ce que le segment pilote."""
@@ -2931,14 +3051,20 @@ def create_app() -> Dash:
                         options=[{"label": u.label, "value": u.key} for u in enabled],
                         value=enabled[0].key, inline=True),
                     dcc.RadioItems(id="unit", className="seg", inline=True),
+                    # English-only build: keep the `lang` prop because the
+                    # callbacks still read it, but it is no longer a UI choice.
                     dcc.RadioItems(
-                        id="lang", className="seg",
-                        options=[{"label": l.upper(), "value": l} for l in LANGS],
-                        value="fr", inline=True),
-                    dcc.Link("⚡ Mode scalping", id="scalp-link", href="/scalp",
+                        id="lang", options=[{"label": "EN", "value": "en"}],
+                        value="en", inline=True, style={"display": "none"}),
+                    dcc.Link("⚡ Scalping mode", id="scalp-link", href="/scalp",
                              className="linkbtn scalp-link"),
-                    dcc.Link("← Vue complète", id="full-link", href="/",
+                    dcc.Link("← Full view", id="full-link", href="/",
                              className="linkbtn full-link"),
+                    # Bascule clair/sombre : cookie + rechargement, pour que
+                    # Plotly et les graphiques /scalp soient régénérés avec la
+                    # bonne palette (cf. asset theme.js).
+                    html.Button("☾", id="theme-toggle", className="linkbtn theme-toggle",
+                                title="Light / Dark"),
                     # page statique servie depuis assets/ (nouvel onglet)
                     html.A(id="faq-link", className="linkbtn", href="/assets/faq.html",
                            target="_blank", children="FAQ"),
@@ -2959,13 +3085,13 @@ def create_app() -> Dash:
                     # display piloté par cette bascule plutôt que toujours
                     # ouvert.
                     html.Button("⚙", id="sc-controls-toggle", className="linkbtn sc-controls-gear",
-                                title="Personnalisation de l'affichage"),
+                                title="Display customization"),
                     # Connexion courtier : lien direct vers la route OAuth
                     # (cf. gex/tt_web.py). Masqué une fois connecté — un bouton
                     # « Connecter » affiché en permanence ferait douter de
                     # l'état réel de la connexion.
                     html.A(id="tt-connect", className="linkbtn",
-                           href="/oauth/start", children="Connecter tastytrade",
+                           href="/oauth/start", children="Connect tastytrade",
                            style={"display": "none"}),
                 ], style={"display": "flex", "gap": "10px", "flexWrap": "wrap",
                           "alignItems": "center"}),
@@ -2973,13 +3099,39 @@ def create_app() -> Dash:
             html.Div([
                 ctl("lbl-bucket", dcc.RadioItems(id="bucket", className="seg",
                                                  value="Tout", inline=True)),
-                ctl("lbl-window", dcc.RadioItems(
-                    id="window", className="seg",
-                    options=[{"label": "±2%", "value": 0.02},
-                             {"label": "±4%", "value": 0.04},
-                             {"label": "±10%", "value": 0.10}],
-                    value=0.04, inline=True)),
+                ctl("lbl-window", html.Div([
+                    dcc.RadioItems(
+                        id="window", className="seg",
+                        options=[{"label": "±2%", "value": 0.02},
+                                 {"label": "±4%", "value": 0.04},
+                                 {"label": "±10%", "value": 0.10}],
+                        value=0.04, inline=True),
+                    # Pourcentage libre : ajoute une option « ±x% » aux presets
+                    # et pousse sa valeur dans le même RadioItems, donc tous
+                    # les graphiques existants réagissent sans callback dédié.
+                    html.Div([
+                        dcc.Input(id="window-custom", type="number",
+                                  min=0.1, max=50, step=0.5, n_submit=0,
+                                  placeholder="±%", className="ticker-input window-input"),
+                        html.Button("✓", id="window-custom-apply", n_clicks=0,
+                                    className="btn window-apply",
+                                    title="Apply this percentage"),
+                    ], className="window-custom"),
+                    html.Span(id="window-msg", className="window-msg"),
+                ], className="window-control")),
                 dcc.Checklist(id="majors", className="check", value=[], inline=True),
+                # Recherche libre : valide le ticker auprès de CBOE, l'ajoute
+                # aux cibles (persisté dans data/tickers.json) et le sélectionne.
+                html.Div([
+                    html.Span("Ticker", className="ctl-label"),
+                    dcc.Input(id="ticker-input", type="text", n_submit=0,
+                              placeholder="ex. SOXL", className="ticker-input",
+                              maxLength=10),
+                    html.Button("+", id="ticker-add", n_clicks=0,
+                                className="btn ticker-add-btn",
+                                title="Ajouter un ticker"),
+                    html.Span(id="ticker-msg", className="ticker-msg"),
+                ], className="ctl ticker-add"),
             ], className="toolbar"),
         ], className="topbar"),
 
@@ -3051,9 +3203,9 @@ def create_app() -> Dash:
                 # avec un titre, pour qu'elle se remarque comme n'importe
                 # quelle autre carte de la page.
                 html.Div([
-                    html.Div("⚙ Personnalisation de l'affichage", className="sc-controls-title"),
+                    html.Div("⚙ Display customization", className="sc-controls-title"),
                     html.Div([
-                        html.Button("↕ Disposition verticale", id="sc-layout-toggle",
+                        html.Button("↕ Vertical layout", id="sc-layout-toggle",
                                    className="sc-layout-toggle", n_clicks=0),
                         # Ergonomie/concentration (/scalp v2 seulement) — piste
                         # d'origine : "masquage de graphiques/tape, mode mots-clés
@@ -3069,11 +3221,11 @@ def create_app() -> Dash:
                             # callback ci-dessous, toujours respectée si déjà enregistrée).
                             value=["hide_ladder", "hide_price_chart", "hide_hedge_chart", "hide_tape"],
                             options=[
-                                {"label": "Masquer niveaux", "value": "hide_ladder"},
-                                {"label": "Masquer graphique prix", "value": "hide_price_chart"},
-                                {"label": "Masquer couverture dealers", "value": "hide_hedge_chart"},
-                                {"label": "Masquer tape", "value": "hide_tape"},
-                                {"label": "Mode mots-clés", "value": "keywords_only"},
+                                {"label": "Hide levels", "value": "hide_ladder"},
+                                {"label": "Hide price chart", "value": "hide_price_chart"},
+                                {"label": "Hide dealer hedge", "value": "hide_hedge_chart"},
+                                {"label": "Hide tape", "value": "hide_tape"},
+                                {"label": "Keywords only", "value": "keywords_only"},
                             ],
                         ),
                     ], className="sc-controls-row"),
@@ -3088,8 +3240,8 @@ def create_app() -> Dash:
                     # jamais après coup. Dash garde la main sur le CONTENU de
                     # chaque widget (scalp-ladder, scalp-banner, etc. via
                     # leurs Output habituels), jamais sur sa position/taille.
-                    html.Span("Glisser l'en-tête d'un bloc pour le déplacer, "
-                             "le coin pour le redimensionner.",
+                    html.Span("Drag a block header to move it, "
+                             "the corner to resize it.",
                              className="sc-order-hint"),
                 ], className="sc-controls"),
                 html.Div([
@@ -3116,8 +3268,8 @@ def create_app() -> Dash:
                         dcc.Store(id="scalp-banner-version", storage_type="local", data="v1"),
                         html.Button("V1", id="scalp-banner-version-toggle",
                                     className="sc-draw-btn sc-ind-btn sc-banner-version-btn",
-                                    title="Bandeau : V1 (fenêtre fixe 5 min, comme /scalpv1) — cliquer pour "
-                                          "basculer en V2 (swing H/L 60V)"),
+                                    title="Banner: V1 (fixed 5-minute window, like /scalpv1) — click to "
+                                          "switch to V2 (swing H/L 60V)"),
                     ], className="sc-bannerbox-wrap"),
                     html.Div(id="scalp-head", className="sc-head"),
                 ], className="sc-fixed-top"),
@@ -3130,14 +3282,14 @@ def create_app() -> Dash:
                 # par défaut via grid.load(), pas des attributs HTML.
                 html.Div([
                     html.Div([html.Div([
-                        html.Span("⠿ Niveaux", className="sc-widget-handle"),
-                        html.Div([html.Div("Niveaux · distance au spot (pts)", className="sc-title"),
+                        html.Span("⠿ Levels", className="sc-widget-handle"),
+                        html.Div([html.Div("Levels · distance to spot (pts)", className="sc-title"),
                                   html.Div(id="scalp-ladder")], className="sc-card sc-ladder"),
                     ], className="grid-stack-item-content"),
                     ], className="grid-stack-item",
                        **{"data-gs-id": "ladder"}),
                     html.Div([html.Div([
-                        html.Span("⠿ Graphique", className="sc-widget-handle"),
+                        html.Span("⠿ Chart", className="sc-widget-handle"),
                         html.Div([dcc.Graph(config=GRAPH_CONFIG, id="scalp-price")],
                                  id="scalp-price-card", className="sc-card sc-underlying"),
                         # Carte v2 (Lightweight Charts) : masquée par défaut
@@ -3166,17 +3318,17 @@ def create_app() -> Dash:
                             # défaut seulement) — amélioration possible plus
                             # tard.
                             html.Div([
-                                html.Button("⬚", title="Sélection (Échap)", id="scalp-draw-tool-none",
+                                html.Button("⬚", title="Select (Esc)", id="scalp-draw-tool-none",
                                             className="sc-draw-btn sc-draw-active", **{"data-tool": "none"}),
-                                html.Button("／", title="Tendance (Alt+T)", className="sc-draw-btn",
+                                html.Button("／", title="Trendline (Alt+T)", className="sc-draw-btn",
                                             **{"data-tool": "trendline"}),
-                                html.Button("—", title="Horizontale (Alt+H)", className="sc-draw-btn",
+                                html.Button("—", title="Horizontal (Alt+H)", className="sc-draw-btn",
                                             **{"data-tool": "horizontal"}),
-                                html.Button("¦", title="Verticale", className="sc-draw-btn",
+                                html.Button("¦", title="Vertical", className="sc-draw-btn",
                                             **{"data-tool": "vertical"}),
-                                html.Button("↗", title="Rayon", className="sc-draw-btn",
+                                html.Button("↗", title="Ray", className="sc-draw-btn",
                                             **{"data-tool": "ray"}),
-                                html.Button("⇉", title="Canal parallèle", className="sc-draw-btn",
+                                html.Button("⇉", title="Parallel channel", className="sc-draw-btn",
                                             **{"data-tool": "channel"}),
                                 html.Button("▭", title="Rectangle (Alt+R)", className="sc-draw-btn",
                                             **{"data-tool": "rectangle"}),
@@ -3184,15 +3336,15 @@ def create_app() -> Dash:
                                             **{"data-tool": "ellipse"}),
                                 html.Button("Fib", title="Fibonacci (Alt+F)", className="sc-draw-btn",
                                             **{"data-tool": "fibonacci"}),
-                                html.Button("T", title="Texte", className="sc-draw-btn",
+                                html.Button("T", title="Text", className="sc-draw-btn",
                                             **{"data-tool": "text"}),
-                                html.Button("🧲", title="Aimant (accroche OHLC)", id="scalp-draw-magnet",
+                                html.Button("🧲", title="Magnet (snap to OHLC)", id="scalp-draw-magnet",
                                             className="sc-draw-btn"),
-                                html.Button("↶", title="Annuler (Ctrl+Z)", id="scalp-draw-undo",
+                                html.Button("↶", title="Undo (Ctrl+Z)", id="scalp-draw-undo",
                                             className="sc-draw-btn"),
-                                html.Button("↷", title="Rétablir (Ctrl+Y)", id="scalp-draw-redo",
+                                html.Button("↷", title="Redo (Ctrl+Y)", id="scalp-draw-redo",
                                             className="sc-draw-btn"),
-                                html.Button("🗑", title="Tout effacer", id="scalp-draw-clear",
+                                html.Button("🗑", title="Clear all", id="scalp-draw-clear",
                                             className="sc-draw-btn"),
                                 # Recentrage (2026-10-05, demande explicite) :
                                 # changer de symbole (NQ <-> ES, échelles de
@@ -3202,7 +3354,7 @@ def create_app() -> Dash:
                                 # pour ne jamais écraser un zoom manuel) — sans
                                 # ce bouton, il fallait défiler à la main pour
                                 # retrouver le dernier prix après un switch.
-                                html.Button("⌖", title="Recentrer sur le dernier prix",
+                                html.Button("⌖", title="Recenter on last price",
                                            id="scalp-chart-recenter", className="sc-draw-btn"),
                             ], id="scalp-draw-toolbar", className="sc-draw-toolbar"),
                             # Indicateurs du graphique (2026-10-04) —
@@ -3222,31 +3374,31 @@ def create_app() -> Dash:
                                 # défaut — cohérent avec le chart-stream lui-même coupé
                                 # (cf. clientside_callback chart-stream) ; rien à afficher
                                 # tant que ce n'est pas réactivé.
-                                html.Button("Niveaux GEX", id="scalp-ind-levels-toggle",
+                                html.Button("GEX levels", id="scalp-ind-levels-toggle",
                                             className="sc-draw-btn sc-ind-btn",
-                                            title="Afficher/masquer les niveaux GEX/HVL/Flip/murs"),
+                                            title="Show/hide GEX/HVL/Flip/wall levels"),
                                 html.Button("Confluence", id="scalp-ind-confluence-toggle",
                                             className="sc-draw-btn sc-ind-btn",
-                                            title="Afficher/masquer les zones de confluence multi-familles"),
+                                            title="Show/hide multi-family confluence zones"),
                                 html.Button("Order flow", id="scalp-ind-orderflow-toggle",
                                             className="sc-draw-btn sc-ind-btn",
-                                            title="Afficher/masquer les zones HVL order-flow"),
-                                html.Button("Σ Profil gamma", id="scalp-gexprofile-toggle",
+                                            title="Show/hide order-flow HVL zones"),
+                                html.Button("Σ Gamma profile", id="scalp-gexprofile-toggle",
                                             className="sc-draw-btn sc-ind-btn",
-                                            title="Afficher/masquer le profil de GEX par strike "
-                                                  "(open interest + volume du jour)"),
+                                            title="Show/hide the GEX profile by strike "
+                                                  "(open interest + session volume)"),
                                 html.Button("Swing H/L", id="scalp-ind-markers-toggle",
                                             className="sc-draw-btn sc-ind-btn",
-                                            title="Afficher/masquer les pivots swing high/low"),
-                                html.Button("Profil volume", id="scalp-ind-ofprofile-toggle",
+                                            title="Show/hide swing high/low pivots"),
+                                html.Button("Volume profile", id="scalp-ind-ofprofile-toggle",
                                             className="sc-draw-btn sc-ind-btn",
-                                            title="Afficher/masquer le profil de volume des 2 "
-                                                  "dernières jambes de swing (POC/VAH/VAL)"),
+                                            title="Show/hide the volume profile of the last 2 "
+                                                  "swing legs (POC/VAH/VAL)"),
                                 html.Button("HVN/LVN", id="scalp-ind-untested-toggle",
                                             className="sc-draw-btn sc-ind-btn",
-                                            title="Afficher/masquer les zones HVN/LVN non "
-                                                  "testées (indépendant du profil de volume "
-                                                  "par jambe ci-dessus)"),
+                                            title="Show/hide untested HVN/LVN zones "
+                                                  "(independent of the per-leg volume "
+                                                  "profile above)"),
                             ], className="sc-ind-toolbar"),
                             html.Div(id="scalp-lw-chart", className="sc-lw-chart"),
                         ], id="scalp-lw-card", className="sc-card sc-underlying"),
@@ -3255,12 +3407,12 @@ def create_app() -> Dash:
                     ], className="grid-stack-item",
                        **{"data-gs-id": "chart"}),
                     html.Div([html.Div([
-                        html.Span("⠿ Gros prints", className="sc-widget-handle"),
+                        html.Span("⠿ Large prints", className="sc-widget-handle"),
                         html.Div([
-                            html.Div([html.Span("Gros prints", className="sc-title"),
+                            html.Div([html.Span("Large prints", className="sc-title"),
                                       dcc.RadioItems(id="scalp-min", className="seg", inline=True,
                                                      value=5,
-                                                     options=[{"label": "Tout", "value": 0},
+                                                     options=[{"label": "All", "value": 0},
                                                               {"label": "≥ 5", "value": 5},
                                                               {"label": "≥ 20", "value": 20}])],
                                      className="sc-cardhead"),
@@ -3270,9 +3422,9 @@ def create_app() -> Dash:
                     ], className="grid-stack-item",
                        **{"data-gs-id": "prints"}),
                     html.Div([html.Div([
-                        html.Span("⠿ Couverture des dealers", className="sc-widget-handle"),
+                        html.Span("⠿ Dealer hedge", className="sc-widget-handle"),
                         html.Div([
-                            html.Div([html.Span("Couverture des dealers", className="sc-title"),
+                            html.Div([html.Span("Dealer hedge", className="sc-title"),
                                       dcc.RadioItems(id="scalp-window", className="seg", inline=True,
                                                      value=-1,
                                                      options=[{"label": "● Live 5 min", "value": -1},
@@ -3422,7 +3574,7 @@ def create_app() -> Dash:
             # au chargement malgré prevent_initial_call). Passé ces 5 s, tout
             # redevient réactif normalement pour une vraie interaction.
             dcc.Store(id="emergency-ready", data=False),
-            dcc.Store(id="lang-boot", data=0),
+
             dcc.Store(id="sc-layout-boot", data=0),
             dcc.Store(id="sc-ergo-boot", data=0),
             dcc.Store(id="sc-grid-boot", data=0),
@@ -3469,9 +3621,9 @@ def create_app() -> Dash:
             items.append(_chip(
                 [html.B(f"{labels[lv.strike]} ", style={"color": C["lvl"]}),
                  f"{xf(lv.strike):.0f} ",
-                 html.Span(f"({lv.gex / 1e9:+.1f} $Bn {side})",
+                 html.Span(f"({fmt_money(lv.gex, signed=True)} {side})",
                            style={"color": C["ink2"], "fontSize": "11px"})],
-                "rgba(255,255,255,0.10)",
+                C["chip"],
             ))
         return items
 
@@ -3487,20 +3639,6 @@ def create_app() -> Dash:
         Input("rt-tick", "n_intervals"),
     )
 
-    # Détection de la langue du navigateur au chargement ; un choix manuel
-    # (bouton FR/EN) est mémorisé dans localStorage et prime sur la détection.
-    app.clientside_callback(
-        """
-        function(_) {
-            const saved = window.localStorage.getItem('gex-lang');
-            if (saved === 'fr' || saved === 'en') return saved;
-            const nav = (navigator.language || 'en').slice(0, 2).toLowerCase();
-            return nav === 'fr' ? 'fr' : 'en';
-        }
-        """,
-        Output("lang", "value"),
-        Input("lang-boot", "data"),
-    )
     # Page /scalp : classe sur <body> qui masque le reste du dashboard (cf. style.css)
     #
     # /scalp et /scalpv1 partagent AUJOURD'HUI le même rendu (le chantier v2 n'a
@@ -3731,7 +3869,7 @@ def create_app() -> Dash:
                     if (redoBtn) redoBtn.addEventListener('click', redo);
                     const clearBtn = document.getElementById('scalp-draw-clear');
                     if (clearBtn) clearBtn.addEventListener('click', function() {
-                        if (window.confirm('Effacer tous les tracés de ce symbole ?')) clearAll();
+                        if (window.confirm('Clear all drawings for this symbol?')) clearAll();
                     });
                 }
             }
@@ -3739,8 +3877,8 @@ def create_app() -> Dash:
                 container.innerHTML = '';
                 const chart = LightweightCharts.createChart(container, {
                     width: container.clientWidth, height: container.clientHeight,
-                    layout: { background: { color: 'transparent' }, textColor: '#cfd3da' },
-                    grid: { vertLines: { color: '#1e222a' }, horzLines: { color: '#1e222a' } },
+                    layout: { background: { color: 'transparent' }, textColor: gexColor('--ink-2', '#374151') },
+                    grid: { vertLines: { color: gexColor('--line', '#e5e7eb') }, horzLines: { color: gexColor('--line', '#e5e7eb') } },
                     // Lightweight Charts n'utilise PAS le fuseau du navigateur
                     // par défaut malgré ce que laissait croire sa doc — il
                     // formate les UTCTimestamp en UTC pur sauf formateur
@@ -3766,8 +3904,8 @@ def create_app() -> Dash:
                     },
                 });
                 const series = chart.addCandlestickSeries({
-                    upColor: '#199e70', downColor: '#e66767', borderVisible: false,
-                    wickUpColor: '#199e70', wickDownColor: '#e66767',
+                    upColor: gexColor('--ok', '#047857'), downColor: gexColor('--neg', '#dc2626'), borderVisible: false,
+                    wickUpColor: gexColor('--ok', '#047857'), wickDownColor: gexColor('--neg', '#dc2626'),
                 });
                 // ResizeObserver sur le CONTENEUR, pas juste window.resize —
                 // la taille du conteneur change aussi sans redimensionner la
@@ -3864,7 +4002,7 @@ def create_app() -> Dash:
                     const confluenceLines = ind.confluence ? (d.confluence || []).map(function(z) {
                         const alpha = Math.max(0.3, 0.9 - (z.rank - 1) * (0.6 / 9));
                         return st.series.createPriceLine({
-                            price: z.price, color: 'rgba(201, 133, 0, ' + alpha + ')', lineWidth: 1,
+                            price: z.price, color: 'rgba(180, 83, 9, ' + alpha + ')', lineWidth: 1,
                             lineStyle: LightweightCharts.LineStyle.Solid,
                             axisLabelVisible: true, title: 'CL' + z.rank,
                         });
@@ -3875,7 +4013,7 @@ def create_app() -> Dash:
                     // simples (tirets) et de la confluence (pleine dorée).
                     const flowLines = ind.order_flow ? (d.order_flow || []).map(function(h) {
                         return st.series.createPriceLine({
-                            price: h.price, color: '#3987e5', lineWidth: 1,
+                            price: h.price, color: gexColor('--accent', '#2563eb'), lineWidth: 1,
                             lineStyle: LightweightCharts.LineStyle.Dotted,
                             axisLabelVisible: true,
                             title: 'HVL ' + (h.side === 'BUY' ? '↑' : '↓') + ' ' + Math.round(h.vol),
@@ -3893,7 +4031,7 @@ def create_app() -> Dash:
                         const isHigh = m.kind.startsWith('H');
                         return {
                             time: m.time, position: isHigh ? 'aboveBar' : 'belowBar',
-                            color: isHigh ? '#e66767' : '#199e70',
+                            color: isHigh ? gexColor('--neg', '#dc2626') : gexColor('--ok', '#047857'),
                             shape: isHigh ? 'arrowDown' : 'arrowUp',
                             text: m.kind + ' ' + Math.round(m.price),
                         };
@@ -4028,8 +4166,8 @@ def create_app() -> Dash:
             const v = (version === 'v1') ? 'v1' : 'v2';
             btn.textContent = v.toUpperCase();
             btn.title = v === 'v2'
-                ? 'Bandeau : V2 (swing H/L 60V) — cliquer pour basculer en V1 (fenêtre fixe 5 min, comme /scalpv1)'
-                : 'Bandeau : V1 (fenêtre fixe 5 min, comme /scalpv1) — cliquer pour basculer en V2 (swing H/L 60V)';
+                ? 'Banner: V2 (60V swing H/L) — click to switch to V1 (fixed 5-minute window, like /scalpv1)'
+                : 'Banner: V1 (fixed 5-minute window, like /scalpv1) — click to switch to V2 (60V swing H/L)';
             btn.classList.toggle('sc-draw-active', v === 'v2');
             return window.dash_clientside.no_update;
         }
@@ -4103,7 +4241,7 @@ def create_app() -> Dash:
         prevent_initial_call=True,
     )
 
-    # Couverture des dealers (/scalp v2) — même principe que le graphique de
+    # Dealer hedge (/scalp v2) — même principe que le graphique de
     # prix : un LineSeries par catégorie, créés UNE fois (persistés dans
     # window._gexLwHedge), seulement `setData` ensuite. Piège du canvas à
     # largeur 0 déjà réglé pour le graphique de prix, même fix ici.
@@ -4118,8 +4256,8 @@ def create_app() -> Dash:
                 container.innerHTML = '';
                 const chart = LightweightCharts.createChart(container, {
                     width: container.clientWidth, height: container.clientHeight,
-                    layout: { background: { color: 'transparent' }, textColor: '#cfd3da' },
-                    grid: { vertLines: { color: '#1e222a' }, horzLines: { color: '#1e222a' } },
+                    layout: { background: { color: 'transparent' }, textColor: gexColor('--ink-2', '#374151') },
+                    grid: { vertLines: { color: gexColor('--line', '#e5e7eb') }, horzLines: { color: gexColor('--line', '#e5e7eb') } },
                     // Lightweight Charts n'utilise PAS le fuseau du navigateur
                     // par défaut malgré ce que laissait croire sa doc — il
                     // formate les UTCTimestamp en UTC pur sauf formateur
@@ -4189,13 +4327,6 @@ def create_app() -> Dash:
         if is_scalp_path(path) and symbol not in ("NQ", "ES"):
             return "NQ"
         raise PreventUpdate
-
-    app.clientside_callback(
-        "function(l) { window.localStorage.setItem('gex-lang', l); return window.dash_clientside.no_update; }",
-        Output("lang-boot", "data"),
-        Input("lang", "value"),
-        prevent_initial_call=True,
-    )
 
     # Disposition verticale /scalp v2 (cf. .sc-layout-toggle, style.css) :
     # restaure la préférence au chargement — serveur si identifié (Cloudflare
@@ -4531,7 +4662,7 @@ def create_app() -> Dash:
             const swing = (bannerVersion || 'v2') !== 'v1' ? '1' : '0';
             const connect = function() {
                 const es = new EventSource(
-                    `/api/v1/${symbol}/scalp-indicators-stream?lang=${lang || 'fr'}&swing=${swing}`);
+                    `/api/v1/${symbol}/scalp-indicators-stream?lang=${lang || 'en'}&swing=${swing}`);
                 window._scIndStream = es;
                 es.onmessage = function(ev) {
                     state.delay = 3000;
@@ -4582,8 +4713,10 @@ def create_app() -> Dash:
          Output("tape-note", "children"),
          Output("heat-levels-label", "children"), Output("heat-levels", "options"),
          Output("tape-hint", "children"), Output("lbl-tape-size", "children"),
-         Output("tape-min-size", "options"), Output("tape-combos", "options")],
+         Output("tape-min-size", "options"), Output("tape-combos", "options"),
+         Output("symbol", "options", allow_duplicate=True)],
         [Input("lang", "value"), Input("symbol", "value")],
+        prevent_initial_call="initial_duplicate",
     )
     def apply_lang(lang, symbol):
         bucket_opts = [{"label": t(lang, BUCKET_KEYS[b]), "value": b} for b in EXPIRY_BUCKETS]
@@ -4619,6 +4752,11 @@ def create_app() -> Dash:
                           {"label": "≥ 50", "value": 50},
                           {"label": "≥ 100", "value": 100}]
         tape_combos_opts = [{"label": t(lang, "tape_show_combos"), "value": "combos"}]
+        # Le layout initial est construit au démarrage : sans ce rafraîchissement,
+        # un constituant surveillé ajouté ensuite (NVDA) n'apparaîtrait qu'après
+        # un redémarrage du process. Il revient donc à chaque chargement.
+        symbol_opts = [{"label": item.label, "value": item.key}
+                       for item in selectable_underlyings()]
         return (bucket_opts, majors_opts, t(lang, "flow_day_label"),
                 t(lang, "last_session"), t(lang, "footer_rt" if credentials_present() else "footer"), opts,
                 t(lang, "app_title"),
@@ -4628,7 +4766,7 @@ def create_app() -> Dash:
                 t(lang, "tape_note"),
                 t(lang, "heat_levels_label"), heat_levels_opts,
                 t(lang, "tape_hint"), t(lang, "tape_size_label"),
-                tape_size_opts, tape_combos_opts)
+                tape_size_opts, tape_combos_opts, symbol_opts)
 
     @app.callback(
         [Output("brand-sub", "children"), Output("rt-badge", "style"),
@@ -4764,7 +4902,7 @@ def create_app() -> Dash:
                 empty_fig(wait, t(lang, "flow_title")),
                 empty_fig(wait, t(lang, "gflow_title")),
                 empty_fig(wait, t(lang, "tape_title")),
-                empty_fig(wait, t(lang, "hist_title")),
+                empty_fig(wait, t(lang, "hist_title", unit="$Bn")),
                 empty_fig(wait, t(lang, "spotzg_title")),
                 empty_fig(wait, t(lang, "smile_title")),
                 "", t(lang, "tv_copy_title", scale=unit),
@@ -4831,6 +4969,120 @@ def create_app() -> Dash:
         return styles + labels
 
     @app.callback(
+        Output("symbol", "options", allow_duplicate=True),
+        Output("symbol", "value", allow_duplicate=True),
+        Output("ticker-msg", "children"),
+        Output("ticker-msg", "style"),
+        Output("ticker-input", "value"),
+        Input("ticker-add", "n_clicks"),
+        Input("ticker-input", "n_submit"),
+        State("ticker-input", "value"),
+        State("symbol", "value"),
+        State("lang", "value"),
+        prevent_initial_call=True,
+    )
+    def add_ticker_from_input(_n_clicks, _n_submit, raw, current, lang):
+        """Valide un ticker CBOE, l'ajoute aux cibles et le sélectionne.
+
+        La validation télécharge la chaîne une seule fois, puis `ingest_snapshot`
+        publie ce même snapshot : le premier écran est peuplé immédiatement, au
+        lieu d'attendre le prochain cycle de pull (60 s). En cas d'échec après
+        l'ajout, le ticker est retiré pour ne pas laisser une cible morte dans
+        le sélecteur.
+        """
+        if not (raw or "").strip():
+            return (no_update, no_update, t(lang, "ticker_empty"),
+                    {"color": "var(--neg)"}, no_update)
+        try:
+            ticker = normalize_ticker(raw)
+        except ValueError:
+            return (no_update, no_update, t(lang, "ticker_invalid"),
+                    {"color": "var(--neg)"}, no_update)
+
+        existing = UNDERLYINGS.get(ticker)
+        if existing is not None:
+            if existing.role == "target":
+                return (no_update, ticker, t(lang, "ticker_exists", ticker=ticker),
+                        {"color": "var(--muted)"}, "")
+            if existing.role == "constituent":
+                # Déjà collecté pour la confluence : on l'expose comme onglet
+                # sans le retirer des constituants ni le re-télécharger.
+                _u, newly = watch_constituent(ticker)
+                opts = [{"label": item.label, "value": item.key}
+                        for item in selectable_underlyings()]
+                key = "ticker_watch_added" if newly else "ticker_watch_exists"
+                return (opts, ticker, t(lang, key, ticker=ticker),
+                        {"color": "var(--ok)" if newly else "var(--muted)"}, "")
+            # Contexte (VIX, ZN, CL…) : pas de chaîne d'options à afficher.
+            return (no_update, no_update,
+                    t(lang, "ticker_context", ticker=ticker),
+                    {"color": "var(--warn)"}, no_update)
+
+        try:
+            snap = fetch_chain(ticker, ticker, timeout=25)
+            if snap.options.empty or not (snap.spot > 0):
+                raise ValueError("empty chain")
+        except Exception:  # noqa: BLE001 — 403/404/timeout = ticker invalide
+            log.info("Ticker add rejected: %s not found or no CBOE chain",
+                     ticker)
+            return (no_update, no_update, t(lang, "ticker_invalid"),
+                    {"color": "var(--neg)"}, no_update)
+
+        u, created = add_target(ticker)
+        if not created:     # course improbable avec un autre ajout
+            return (no_update, u.key, t(lang, "ticker_exists", ticker=ticker),
+                    {"color": "var(--muted)"}, "")
+
+        try:
+            ingest_snapshot(ticker, snap, persist_snapshot=True)
+        except Exception as exc:  # noqa: BLE001 — on ne laisse pas de cible morte
+            log.exception("Ticker %s add: first ingest failed", ticker)
+            remove_target(ticker)
+            return (no_update, no_update,
+                    t(lang, "ticker_failed", ticker=ticker, err=str(exc)[:120]),
+                    {"color": "var(--neg)"}, no_update)
+
+        log.info("Ticker %s added from the UI", ticker)
+        opts = [{"label": item.label, "value": item.key}
+                for item in selectable_underlyings()]
+        return (opts, ticker, t(lang, "ticker_added", ticker=ticker),
+                {"color": "var(--ok)"}, "")
+
+    # Clientside volontairement : un dcc.Input type="number" ne propage pas
+    # toujours sa valeur avant le clic sur le bouton (blur/click dans le même
+    # tick). Lire `el.value` directement évite ce décalage ; la validation et
+    # le libellé restent identiques aux presets.
+    app.clientside_callback(
+        """
+        function (n_clicks, n_submit, lang) {
+            const el = document.getElementById('window-custom');
+            const raw = el ? String(el.value).trim() : '';
+            const pct = parseFloat(raw);
+            if (!raw || !isFinite(pct) || pct < 0.1 || pct > 50) {
+                return [window.dash_clientside.no_update,
+                        window.dash_clientside.no_update,
+                        'Invalid percentage (0.1 to 50).'];
+            }
+            const frac = Math.round(pct * 10000) / 1000000;
+            const presets = [[2, 0.02], [4, 0.04], [10, 0.10]];
+            const signed = pct.toFixed(2).replace(/\\.?0+$/, '');
+            const opts = presets.map(([p, v]) => ({label: '±' + p + '%', value: v}));
+            if (!presets.some(([p, v]) => Math.abs(frac - v) < 1e-9)) {
+                opts.push({label: '±' + signed + '%', value: frac});
+            }
+            return [opts, frac, ''];
+        }
+        """,
+        Output("window", "options"),
+        Output("window", "value"),
+        Output("window-msg", "children"),
+        Input("window-custom-apply", "n_clicks"),
+        Input("window-custom", "n_submit"),
+        State("lang", "value"),
+        prevent_initial_call=True,
+    )
+
+    @app.callback(
         [Output("profile", "figure"), Output("profile-exp", "figure"),
          Output("profile-hint", "children")],
         [Input("tick", "n_intervals"), Input("tab", "value"), Input("symbol", "value"),
@@ -4843,7 +5095,8 @@ def create_app() -> Dash:
         with STATE.lock:
             df, snap, summary = st.enriched, st.snapshot, st.summary
         if df is None or snap is None:
-            e = empty_fig(t(lang, "waiting_first_pull"), t(lang, "profile_title"))
+            e = empty_fig(t(lang, "waiting_first_pull"),
+                          t(lang, "profile_title", unit="$Bn"))
             return e, e, t(lang, "profile_hint")
         xf, _, _ = _transform_for(symbol, unit)
         zg = summary.zero_gamma if summary else None
@@ -4873,9 +5126,9 @@ def create_app() -> Dash:
         today = datetime.now(ET).date()
         sel = metrics.add_second_order(df[metrics.bucket_mask(df, bucket, today)], snap.spot)
         cards = [
-            card(t(lang, "vex_card"), f"{sel['vex'].sum() / 1e9:+.2f} $Bn",
+            card(t(lang, "vex_card"), fmt_money(sel["vex"].sum(), signed=True),
                  t(lang, "vex_title").split("(")[-1].rstrip(")")),
-            card(t(lang, "cex_card"), f"{sel['cex'].sum() / 1e9:+.2f} $Bn",
+            card(t(lang, "cex_card"), fmt_money(sel["cex"].sum(), signed=True),
                  t(lang, "cex_title").split("(")[-1].rstrip(")")),
         ]
         return (second_order_fig(sel, snap.spot, "vex", guided(t(lang, "vex_title"), "vex"), window, xf),
@@ -5007,7 +5260,7 @@ def create_app() -> Dash:
         # sérialisation JSON : pas gratuit) doublait le travail par cycle en
         # pure perte — no_update sur cet Output quand /scalp v2 est actif.
         #
-        # "Couverture des dealers" (scalp-hedge) : repassé sur Plotly pour
+        # "Dealer hedge" (scalp-hedge) : repassé sur Plotly pour
         # /scalp v2 AUSSI le 2026-10-05 (donc plus de no_update ici) — la
         # version Lightweight Charts (scalp-lw-hedge) clignotait en mode Live
         # (thread principal du navigateur saturé par les mises à jour trop
@@ -5060,7 +5313,7 @@ def create_app() -> Dash:
     #
     # scalp-lw-hedge-data (hedge LW) retiré entièrement : la carte
     # correspondante est masquée inconditionnellement depuis que
-    # "Couverture des dealers" est repassée sur Plotly (cf. style.css,
+    # "Dealer hedge" est repassée sur Plotly (cf. style.css,
     # confirmé non prioritaire par l'utilisateur) — ce callback ne servait
     # plus à rien, pur gaspillage de requêtes.
 
@@ -5112,7 +5365,7 @@ def create_app() -> Dash:
         """Graphique en PNG à la demande — n'importe lequel, pas juste la
         heatmap (cf. chart_png / CHART_NAMES). Consommé par le bot Discord."""
         from flask import Response, request
-        lang = request.args.get("lang", "fr")
+        lang = request.args.get("lang", "en")
         bucket = request.args.get("bucket", "Tout")
         window = request.args.get("window", type=float)   # ex. 0.02, sinon défaut
         scale = request.args.get("scale")                 # échelle d'affichage
@@ -5122,7 +5375,7 @@ def create_app() -> Dash:
             log.exception("Rendu PNG %s/%s", symbol, name)
             png = None
         if png is None:
-            return Response(f"graphique indisponible : {name}", status=404)
+            return Response(f"chart unavailable: {name}", status=404)
         # Pas d'en-tête de cache avant ce correctif (2026-10-04) : un graphique
         # qui change en continu avec le marché ne doit JAMAIS être mis en
         # cache (navigateur ou intermédiaire) — sans quoi une requête
@@ -5169,7 +5422,7 @@ def create_app() -> Dash:
                 import journal
                 journal.set_user_pref(conn, email, key, value)
         except Exception:  # noqa: BLE001 — une préférence ratée ne doit jamais 500
-            log.exception("Écriture préférence /scalp échouée (%s, %s)", email, key)
+            log.exception("Failed to write /scalp preference (%s, %s)", email, key)
             return jsonify({"ok": False, "reason": "write-failed"}), 200
         return jsonify({"ok": True})
 
@@ -5190,7 +5443,7 @@ def create_app() -> Dash:
         symbol = symbol.upper()
         if symbol not in SCALP_SCHED_SYMBOLS:
             return Response("symbole non couvert (NQ/ES seulement)", status=404)
-        lang = request.args.get("lang", "fr")
+        lang = request.args.get("lang", "en")
         swing = request.args.get("swing") == "1"
 
         def gen():
@@ -5256,7 +5509,7 @@ def create_app() -> Dash:
                         if snap:
                             payload = f"data: {json.dumps(snap, default=lambda o: getattr(o, 'to_plotly_json', lambda: str(o))())}\n\n"
                 except Exception:  # noqa: BLE001 — un cycle de CALCUL raté ne doit jamais fermer le flux
-                    log.exception("Flux SSE indicateurs /scalp échoué (%s)", symbol)
+                    log.exception("Scalp indicator SSE stream failed (%s)", symbol)
                 now = time.monotonic()
                 if payload is not None:
                     yield payload
@@ -5324,7 +5577,7 @@ def create_app() -> Dash:
                                 last_sig = sig
                                 payload = f"data: {json.dumps(data)}\n\n"
                 except Exception:  # noqa: BLE001 — un cycle de CALCUL raté ne doit jamais fermer le flux
-                    log.exception("Flux SSE graphique /scalp échoué (%s, tf=%s)", symbol, tf)
+                    log.exception("Scalp chart SSE stream failed (%s, tf=%s)", symbol, tf)
                 now = time.monotonic()
                 if payload is not None:
                     yield payload

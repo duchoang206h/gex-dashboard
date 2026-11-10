@@ -107,8 +107,8 @@ def test_banner_amplification_rendu(monkeypatch, flux):
     ctx = {"zg": 29900.0, "gamma": "Gamma Positif"}
     div = app.scalp_banner("NQ", ctx, 30040.0, "fr")
     txt = str(div.to_plotly_json())
-    assert "sc-tone-alert" in txt and "Amplification haussière" in txt
-    assert "malgré un gamma positif" in txt
+    assert "sc-tone-alert" in txt and "bullish amplification" in txt
+    assert "despite positive gamma" in txt
 
 
 def test_banner_swing_amplification_rendu(monkeypatch, flux):
@@ -136,7 +136,7 @@ def test_banner_swing_amplification_rendu(monkeypatch, flux):
     ctx = {"zg": 29900.0, "gamma": "Gamma Positif"}
     div = app.scalp_banner("NQ", ctx, 30059.0, "fr", swing=True)
     txt = str(div.to_plotly_json())
-    assert "sc-tone-alert" in txt and "Amplification haussière" in txt
+    assert "sc-tone-alert" in txt and "bullish amplification" in txt
 
 
 def test_scalp_v2_hedge_data_mode_live(flux):
@@ -148,8 +148,8 @@ def test_scalp_v2_hedge_data_mode_live(flux):
     out = app.scalp_v2_hedge_data("NQ", -1, day)  # -1 = mode live
     assert len(out["series"]) == 5
     names = {s["name"] for s in out["series"]}
-    assert "Net cumulé" in names
-    net = next(s for s in out["series"] if s["name"] == "Net cumulé")
+    assert "Cumulative net" in names
+    net = next(s for s in out["series"] if s["name"] == "Cumulative net")
     assert len(net["points"]) > 0
     assert set(net["points"][0]) == {"time", "value"}
 
@@ -167,7 +167,7 @@ def test_banner_hors_seance_donnees_insuffisantes(monkeypatch, flux):
     monkeypatch.setattr(capturebus, "remote_url", lambda: None)
     monkeypatch.setattr(store, "load_prices", lambda s, d: pd.DataFrame())
     div = app.scalp_banner("NQ", {"zg": None, "gamma": None}, 30040.0, "fr")
-    assert "Données insuffisantes" in str(div.to_plotly_json())
+    assert "Insufficient data" in str(div.to_plotly_json())
 
 
 def test_graphe_sous_jacent_bougies_et_niveaux_dans_la_plage(monkeypatch):
@@ -250,7 +250,7 @@ def test_graphe_sous_jacent_retombe_sur_le_dernier_jour(monkeypatch):
                         lambda s, d: bars if d == "2026-09-25" else pd.DataFrame())
     monkeypatch.setattr(store, "price_days", lambda s: ["2026-09-24", "2026-09-25"])
     fig = app.scalp_price_fig("NQ", {"zg": None, "hvl": None, "keys": {}, "walls": []}, 1.5)
-    assert "dernier jour disponible (2026-09-25)" in fig.layout.title.text
+    assert "last available session (2026-09-25)" in fig.layout.title.text
 
 
 def test_scalp_absorption_autonome_lit_capture(monkeypatch):
@@ -288,7 +288,7 @@ def test_panel_absorption_toujours_visible_meme_vide():
     div = app.scalp_absorb_panel("NQ", [], None, "fr")
     assert div.className == "sc-absorb"
     txt = str(div.to_plotly_json())
-    assert "Aucune absorption détectée" in txt
+    assert "No absorption detected" in txt
 
 
 def test_panel_absorption_liste_les_derniers_niveaux_le_plus_recent_en_tete():
@@ -302,7 +302,7 @@ def test_panel_absorption_liste_les_derniers_niveaux_le_plus_recent_en_tete():
     assert "sc-absorb-active" in rows[0].className   # la fraîche clignote
     assert "sc-absorb-active" not in rows[1].className
     assert "support" in rows[0].children and "30,910.25" in rows[0].children
-    assert "résistance" in rows[1].children
+    assert "resistance" in rows[1].children
 
 
 def test_panel_absorption_lang_en():

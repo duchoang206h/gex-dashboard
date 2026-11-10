@@ -93,7 +93,7 @@ def write_by_day(symbol: str, df: pd.DataFrame, min_bars: int = 2) -> list[str]:
     days = []
     for day, part in df.groupby(df["timestamp"].dt.date):
         if len(part) < min_bars:
-            log.debug("%s %s : %d bougie(s) isolée(s), ignorée(s)",
+            log.debug("%s %s: %d isolated candle(s), ignored",
                       symbol, day, len(part))
             continue
         rows = part.to_dict("records")
@@ -134,7 +134,7 @@ async def fetch(stream_symbols: dict[str, str], days: int,
                 # ou quand une autre session utilise le même jeton. Dans les
                 # deux cas ce qui est déjà arrivé reste valable : on le garde
                 # plutôt que de tout perdre sur une exception.
-                log.info("Connexion fermée par dxFeed — %d symboles reçus",
+                log.info("Connection closed by dxFeed — %d symbols received",
                          len(rows))
                 break
             m = json.loads(raw)
@@ -145,7 +145,7 @@ async def fetch(stream_symbols: dict[str, str], days: int,
                     auth_sent = True
                     await send({"type": "AUTH", "channel": 0, "token": token})
                 elif state == "UNAUTHORIZED":
-                    raise RuntimeError("jeton dxFeed refusé")
+                    raise RuntimeError("dxFeed token rejected")
                 elif state == "AUTHORIZED":
                     # contrat HISTORY : c'est lui qui autorise fromTime
                     await send({"type": "CHANNEL_REQUEST", "channel": 1,
@@ -155,7 +155,7 @@ async def fetch(stream_symbols: dict[str, str], days: int,
                 subs = [{"type": "Candle", "symbol": s, "fromTime": from_ms}
                         for s in by_candle]
                 await send({"type": "FEED_SUBSCRIPTION", "channel": 1, "add": subs})
-                log.info("Historique demandé : %d symboles depuis %s",
+                log.info("History requested: %d symbols since %s",
                          len(subs), datetime.fromtimestamp(from_ms / 1000, UTC).date())
             elif typ == "FEED_DATA":
                 for item in (m.get("data") or []):
@@ -173,50 +173,50 @@ def backfill(symbols: list[str] | None = None, days: int = 45,
              period: str = "m") -> dict[str, int]:
     """Télécharge et enregistre l'historique. Renvoie {symbole: nb de bougies}."""
     if not credentials_present():
-        log.error("Identifiants tastytrade absents — backfill impossible")
+        log.error("tastytrade credentials missing — backfill impossible")
         return {}
     _, _, access = quote_token()
     resolved = resolve_symbols(access)
     if symbols:
         missing = [s for s in symbols if s not in resolved]
         if missing:
-            log.warning("Symboles inconnus, ignorés : %s", ", ".join(missing))
+            log.warning("Unknown symbols, ignored: %s", ", ".join(missing))
         resolved = {k: v for k, v in resolved.items() if k in symbols}
     if not resolved:
-        log.error("Aucun symbole à traiter")
+        log.error("No symbol to process")
         return {}
 
     frames = asyncio.run(fetch(resolved, days, period))
     counts: dict[str, int] = {}
     for key, df in sorted(frames.items()):
         if df.empty:
-            log.warning("%s : aucune bougie reçue", key)
+            log.warning("%s: no candles received", key)
             continue
         days_written = write_by_day(key, df)
         counts[key] = len(df)
-        log.info("%-6s %5d bougies  %s → %s  (%d séances)", key, len(df),
+        log.info("%-6s %5d candles  %s → %s  (%d sessions)", key, len(df),
                  df["timestamp"].min().date(), df["timestamp"].max().date(),
                  len(days_written))
         if len(df) >= OBSERVED_CAP:
-            log.info("%s : plafond atteint — l'historique remonte probablement "
-                     "plus loin, relancer avec --period 5m pour couvrir "
-                     "davantage de jours", key)
+            log.info("%s: cap reached — history probably goes back "
+                     "further, rerun with --period 5m to cover "
+                     "more days", key)
     return counts
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--days", type=int, default=45,
-                        help="profondeur demandée (défaut : 45)")
+                        help="requested depth (default: 45)")
     parser.add_argument("--period", default="m",
-                        help="granularité dxFeed : m, 5m, 15m, h… (défaut : m)")
+                        help="dxFeed granularity: m, 5m, 15m, h… (default: m)")
     parser.add_argument("--symbols", nargs="*",
-                        help=f"sous-ensemble ; défaut : tous "
+                        help=f"subset; default: all "
                              f"({', '.join(sorted(UNDERLYINGS))} + futures)")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     counts = backfill(args.symbols, args.days, args.period)
-    print(f"\n{sum(counts.values())} bougies écrites sur {len(counts)} symboles.")
+    print(f"\n{sum(counts.values())} candles written over {len(counts)} symbols.")
 
 
 if __name__ == "__main__":

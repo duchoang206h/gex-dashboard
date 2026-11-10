@@ -337,7 +337,7 @@ var GexDrawingTools = (() => {
     const xb = Math.max(x1, x2);
     posZone(scope, xa, xb, y1, yTarget, POS_GREEN);
     posZone(scope, xa, xb, y1, yStop, POS_RED);
-    strokeLine(scope, toBitmap(scope, xa, y1), toBitmap(scope, xb, y1), "#d1d4dc", 1.5, [5, 3]);
+    strokeLine(scope, toBitmap(scope, xa, y1), toBitmap(scope, xb, y1), "#8e8b84", 1.5, [5, 3]);
     if (showHandles(e)) renderPositionHandles(scope, e, xa, xb, y1);
     const lines = positionReadout(e.d, info);
     if (lines.length > 0) {
@@ -1348,7 +1348,7 @@ var GexDrawingTools = (() => {
       if (tool === "extended")
         return { ...two, type: "trendline", extendLeft: true, extendRight: true };
       if (tool === "measure")
-        return { ...two, type: "trendline", color: "#b2b5be", lineStyle: "dashed" };
+        return { ...two, type: "trendline", color: "#8e8b84", lineStyle: "dashed" };
       if (tool === "channel") {
         return { ...two, type: "channel", time3: p1.time, price3: 2 * p1.price - p2.price };
       }
@@ -1538,7 +1538,7 @@ var GexDrawingTools = (() => {
       this.measureResult = {
         id: "measure",
         type: "trendline",
-        color: "#b2b5be",
+        color: "#8e8b84",
         lineStyle: "dashed",
         price: p1.price,
         time: p1.time,

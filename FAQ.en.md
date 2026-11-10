@@ -92,7 +92,7 @@ Then, depending on your system:
 .venv/bin/python run.py           # macOS / Linux
 ```
 
-Then open **http://127.0.0.1:8050** in a browser.
+Then open **http://127.0.0.1:9050** in a browser.
 
 No configuration needed: the dashboard starts collecting immediately. The
 interface is in English or French, detected from your browser language and

@@ -160,7 +160,7 @@ python3 -m venv .venv
 After the last command, something like this stays on screen:
 
 ```
-Dash is running on http://127.0.0.1:8050/
+Dash is running on http://127.0.0.1:9050/
 ```
 
 Good sign: **the program is running**. Leave this window open — it's what keeps
@@ -171,7 +171,7 @@ the dashboard alive.
 ## Step 5 — Open the dashboard
 
 1. Open your usual browser (Chrome, Edge, Firefox, Safari…).
-2. In the address bar, type exactly: **`127.0.0.1:8050`** then Enter.
+2. In the address bar, type exactly: **`127.0.0.1:9050`** then Enter.
 3. The dashboard appears. 🎉
 
 It starts collecting data immediately. The first values show within seconds;
@@ -201,7 +201,7 @@ the history charts fill in over the days you use it.
 | `command not found: python` (Mac) | On Mac the command is `python3` | Use **`python3`** instead of `python` |
 | The address bar won't accept `powershell` | Window not in focus | Click in the folder again, then in the address bar, retype `powershell` |
 | `pip install` stops on a red error | Network hiccup during download | Just run the same `pip install …` command again |
-| Browser shows "can't reach this site" | The terminal was closed, or you typed the wrong address | Check the terminal window is still open and shows *Dash is running*, and that you typed `127.0.0.1:8050` |
+| Browser shows "can't reach this site" | The terminal was closed, or you typed the wrong address | Check the terminal window is still open and shows *Dash is running*, and that you typed `127.0.0.1:9050` |
 | A firewall window asks for permission on first launch | Windows asks whether the program may access the network | Allow it (needed to fetch the data) |
 
 If you're truly stuck, note the exact error message and ask the person who

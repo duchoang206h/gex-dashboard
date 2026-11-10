@@ -48,14 +48,14 @@ def attendre_spot(quotes=QUOTES, symboles=("SPX", "NDX", "SPY", "QQQ"),
             return True
         dormir(pas)
     manquants = [s for s in symboles if not quotes.price(s)]
-    log.warning("Process capture : spot temps réel absent pour %s après %.0f s — "
-                "le tape démarre sur le repli CBOE", ", ".join(manquants), timeout)
+    log.warning("Capture process: real-time spot missing for %s after %.0f s — "
+                "tape starts on the CBOE fallback", ", ".join(manquants), timeout)
     return False
 
 
 def main(host=None, port: int = DEFAULT_PORT) -> None:
     setup_logging(filename="capture.log")
-    log.info("Process capture : démarrage")
+    log.info("Capture process: starting")
     sched = BackgroundScheduler(timezone="America/New_York")
     add_flush_jobs(sched)
     sched.start()

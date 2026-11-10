@@ -267,7 +267,7 @@ async def _collect_one(streamer_symbols: list[str],
                     auth_sent = True
                     await send({"type": "AUTH", "channel": 0, "token": token})
                 elif state == "UNAUTHORIZED":
-                    raise RuntimeError("jeton dxFeed refusé")
+                    raise RuntimeError("dxFeed token rejected")
                 elif state == "AUTHORIZED":
                     await send({"type": "CHANNEL_REQUEST", "channel": 1,
                                 "service": "FEED",
@@ -282,7 +282,7 @@ async def _collect_one(streamer_symbols: list[str],
             elif typ == "KEEPALIVE":
                 await send({"type": "KEEPALIVE", "channel": 0})
             elif typ == "ERROR":
-                log.warning("dxFeed ERROR pendant la collecte : %s", str(m)[:300])
+                log.warning("dxFeed ERROR during collection: %s", str(m)[:300])
             elif typ == "FEED_DATA":
                 last_data = _time.monotonic()
                 for item in decode_compact_feed_data(m.get("data") or []):
@@ -472,23 +472,23 @@ def build_native_chain(product_code: str, window: float = DEFAULT_WINDOW,
     _, _, access = quote_token()
     spot = _reference_spot(product_code, access)
     if not spot:
-        log.warning("%s : spot indisponible, chaîne native abandonnée", product_code)
+        log.warning("%s: spot unavailable, native chain abandoned", product_code)
         return None
     multiplier = get_multiplier(product_code, access)
     if not multiplier:
-        log.warning("%s : multiplicateur indisponible", product_code)
+        log.warning("%s: multiplier unavailable", product_code)
         return None
 
     chain = fetch_chain_instruments(product_code, access)
     chain = filter_chain(chain, spot, window, max_days, trading_days)
     if chain.empty:
-        log.warning("%s : aucun contrat dans la fenêtre", product_code)
+        log.warning("%s: no contract in the window", product_code)
         return None
 
     raw = asyncio.run(_collect(chain["streamer_symbol"].tolist(),
                                stop_when_complete=True))
     df = enrich_native(chain, raw, spot, multiplier)
-    log.info("%s : chaîne native — %d contrats, spot %.2f, multiplicateur %.0f",
+    log.info("%s: native chain — %d contracts, spot %.2f, multiplier %.0f",
              product_code, len(df), spot, multiplier)
     return df
 
@@ -502,7 +502,7 @@ def pull_native(product_code: str, persist: bool = True) -> pd.DataFrame | None:
     try:
         df = build_native_chain(product_code)
     except Exception:  # noqa: BLE001
-        log.exception("%s : échec de la chaîne native", product_code)
+        log.exception("%s: native chain failed", product_code)
         return None
     if df is None or df.empty:
         return None
@@ -513,5 +513,5 @@ def pull_native(product_code: str, persist: bool = True) -> pd.DataFrame | None:
         try:
             store.save_snapshot(f"{product_code}_OPT", df, datetime.now(ET))
         except Exception:  # noqa: BLE001
-            log.exception("%s : échec d'écriture du snapshot natif", product_code)
+            log.exception("%s: failed to write native snapshot", product_code)
     return df

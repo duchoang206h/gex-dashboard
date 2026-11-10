@@ -265,7 +265,7 @@ class TickCapture:
         if self._started:
             return
         if not credentials_present():
-            log.info("Capture tick continue désactivée (identifiants absents)")
+            log.info("Continuous tick capture disabled (credentials missing)")
             self._state = "off"
             return
         self._started = True
@@ -432,10 +432,10 @@ class TickCapture:
             try:
                 pair = roll.resolve_pair(label, access)
             except Exception:  # noqa: BLE001 — un référentiel muet n'en condamne pas deux
-                log.exception("Capture tick : contrats %s non résolus — exclu", label)
+                log.exception("Tick capture: contracts for %s unresolved — excluded", label)
                 continue
             if not pair:
-                log.warning("Capture tick : aucun contrat %s — exclu", label)
+                log.warning("Tick capture: no contract for %s — excluded", label)
                 continue
             for streamer, code in pair:
                 out[streamer] = (label, code)
@@ -451,7 +451,7 @@ class TickCapture:
                 backoff = BACKOFF_START
             except Exception as exc:  # noqa: BLE001 — la capture doit survivre à tout
                 self._state = "disconnected"
-                log.warning("Capture tick interrompue (%s) — reprise dans %.0f s",
+                log.warning("Tick capture interrupted (%s) — resuming in %.0f s",
                             exc, backoff)
                 time.sleep(backoff)
                 backoff = min(backoff * 2, BACKOFF_MAX)
@@ -469,7 +469,7 @@ class TickCapture:
         universe = self._build_universe(access)
         if not universe:
             self._state = "degraded"
-            raise RuntimeError("aucun future à suivre")
+            raise RuntimeError("no future to track")
 
         # ping_interval/ping_timeout : SANS eux, une coupure réseau sans trame
         # de fermeture propre (constatée le 2026-09-29 14h20 — rtquote.QUOTES,
@@ -500,7 +500,7 @@ class TickCapture:
                         auth_sent = True
                         await send({"type": "AUTH", "channel": 0, "token": token})
                     elif state == "UNAUTHORIZED":
-                        raise RuntimeError("jeton dxFeed refusé")
+                        raise RuntimeError("dxFeed token rejected")
                     elif state == "AUTHORIZED":
                         await send({"type": "CHANNEL_REQUEST", "channel": 1,
                                     "service": "FEED",
@@ -518,13 +518,13 @@ class TickCapture:
                                 "add": [{"type": t, "symbol": s}
                                         for s in universe for t in ("TimeAndSale", "Quote")]})
                     self._state = "connected"
-                    log.info("Capture tick continue active — %s",
+                    log.info("Continuous tick capture active — %s",
                              ", ".join(f"{lbl}:{code}={s}"
                                        for s, (lbl, code) in universe.items()))
                 elif typ == "KEEPALIVE":
                     await send({"type": "KEEPALIVE", "channel": 0})
                 elif typ == "ERROR":
-                    log.warning("dxFeed ERROR (capture tick) : %s", str(m)[:200])
+                    log.warning("dxFeed ERROR (tick capture): %s", str(m)[:200])
                 elif typ == "FEED_DATA":
                     now = time.time()
                     for item in m.get("data") or []:
@@ -538,7 +538,7 @@ class TickCapture:
 
                 # Recyclage périodique : reconnexion + univers reconstruit (roll).
                 if time.monotonic() > deadline:
-                    log.info("Capture tick : renouvellement périodique de la session")
+                    log.info("Tick capture: periodic session refresh")
                     return
 
 

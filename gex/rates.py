@@ -63,11 +63,11 @@ def refresh(force: bool = False) -> float:
         # garde-fou : un taux hors [0, 20 %] est une réponse aberrante — on
         # garde le repli plutôt que d'empoisonner tous les niveaux calculés
         if not 0.0 <= rate <= 0.20:
-            raise ValueError(f"SOFR hors plage : {item.get('percentRate')}")
+            raise ValueError(f"SOFR out of range: {item.get('percentRate')}")
         with _lock:
             _rate, _day = rate, today
-        log.info("Taux sans risque r = %.4f (SOFR effectif %s)",
+        log.info("Risk-free rate r = %.4f (effective SOFR %s)",
                  rate, item.get("effectiveDate"))
     except Exception:  # noqa: BLE001 — réseau/JSON/plage : repli silencieux
-        log.warning("SOFR indisponible, repli sur r = %.4f", _rate)
+        log.warning("SOFR unavailable, falling back to r = %.4f", _rate)
     return _rate

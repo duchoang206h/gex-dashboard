@@ -184,7 +184,7 @@ python bot.py
 ```
 
 Le **dashboard GEX doit tourner** sur la même machine (par défaut
-`http://127.0.0.1:8050`) : c'est lui qui calcule le digest et rend les
+`http://127.0.0.1:9050`) : c'est lui qui calcule le digest et rend les
 graphiques, le bot ne fait que les relayer.
 
 > Pour les commandes graphiques, le dashboard a besoin de **kaleido** (export

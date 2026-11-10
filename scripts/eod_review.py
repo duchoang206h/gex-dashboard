@@ -1,7 +1,7 @@
 """Job de FIN de séance — chaque soir Lun-Ven 22h50 Paris (cash US clos à 22h00).
 
 Mesure ce que la séance a réellement fait (mouvements directionnels propres,
-range, heure de départ vs la fenêtre contrarienne d'avant 16h15) et le compare
+range, heure de start vs la fenêtre contrarienne d'avant 16h15) et le compare
 à ce que les briefs annonçaient. Résultat : lignes `daily_metrics` (symbole NQ)
 dans le journal + un court bilan `data/reviews/AAAA-MM-JJ.md`. Aucun post Discord.
 
@@ -87,13 +87,13 @@ def review_day(conn: sqlite3.Connection, day: dt.date, *, with_briefs: bool,
                dry_run: bool) -> dict | None:
     f = PRICES / f"{day.isoformat()}.parquet"
     if not f.exists():
-        log(f"{day} : pas de bougies {SYMBOL} — ignoré")
+        log(f"{day}: no {SYMBOL} candles — skipped")
         return None
     bars = pd.read_parquet(f)
     briefs = read_and_archive_briefs(day) if with_briefs and not dry_run else {}
     metrics = eodreview.build_metrics(bars, briefs, prev_atr(conn, day))
     if metrics is None:
-        log(f"{day} : séance trop lacunaire (< {eodreview.MIN_BARS} bougies RTH) — ignoré")
+        log(f"{day}: session too sparse (< {eodreview.MIN_BARS} RTH candles) — skipped")
         return None
     if not dry_run:
         ts = dt.datetime.now(PARIS).isoformat()
@@ -105,7 +105,7 @@ def review_day(conn: sqlite3.Connection, day: dt.date, *, with_briefs: bool,
             eodreview.review_markdown(day.isoformat(), metrics), encoding="utf-8")
     dirpts = metrics["dir_pts"][0]
     log(f"{day} : {metrics['dir_tier'][1]:>7} {dirpts:+6.0f} pts"
-        f" départ {metrics.get('dir_debut', (None, '-'))[1]}"
+        f" start {metrics.get('dir_debut', (None, '-'))[1]}"
         f" | early={int(metrics['dir_early'][0])}"
         f" | range {metrics['range_pts'][0]:.0f}"
         + (f" | briefs: {', '.join(sorted(briefs))}" if briefs else "")
@@ -127,15 +127,15 @@ def main() -> None:
             n = 0
             for day in weekdays(*a.backfill):
                 n += review_day(conn, day, with_briefs=False, dry_run=a.dry_run) is not None
-            log(f"backfill {a.backfill[0]} -> {a.backfill[1]} : {n} séance(s) évaluée(s)")
+            log(f"backfill {a.backfill[0]} -> {a.backfill[1]} : {n} session(s) evaluated")
             return
         day = a.date or dt.datetime.now(PARIS).date()
         if day.weekday() >= 5:
-            log(f"{day} : week-end, rien à évaluer")
+            log(f"{day}: weekend, nothing to evaluate")
             return
-        log(f"===== Bilan de séance {day} — DÉBUT =====")
+        log(f"===== Session review {day} — START =====")
         review_day(conn, day, with_briefs=True, dry_run=a.dry_run)
-        log(f"===== Bilan de séance {day} — FIN =====")
+        log(f"===== Session review {day} — END =====")
     finally:
         conn.close()
 

@@ -685,7 +685,7 @@ class FlowTape:
         if self._started:
             return
         if not credentials_present():
-            log.info("Order flow options désactivé (identifiants absents)")
+            log.info("Options order flow disabled (credentials missing)")
             self._state = "off"
             return
         self._started = True
@@ -719,7 +719,7 @@ class FlowTape:
                 for s in syms:
                     out[s] = symbol
             except Exception:  # noqa: BLE001 — un marché muet n'en condamne pas six
-                log.exception("%s : univers de flux indisponible", symbol)
+                log.exception("%s: flow universe unavailable", symbol)
         with self.lock:
             self._spot.update(spots)
             # le centre est REMPLACÉ (pas mis à jour) : c'est le référentiel de
@@ -735,7 +735,7 @@ class FlowTape:
                 backoff = BACKOFF_START
             except Exception as exc:  # noqa: BLE001 — le flux doit survivre à tout
                 self._state = "disconnected"
-                log.warning("Order flow options interrompu (%s) — reprise dans %.0f s",
+                log.warning("Options order flow interrupted (%s) — resuming in %.0f s",
                             exc, backoff)
                 time.sleep(backoff)
                 backoff = min(backoff * 2, BACKOFF_MAX)
@@ -755,7 +755,7 @@ class FlowTape:
         universe = self._build_universe()
         if not universe:
             self._state = "degraded"
-            raise RuntimeError("aucun contrat à suivre")
+            raise RuntimeError("no contract to track")
         with self.lock:
             self._by_stream = universe
 
@@ -787,7 +787,7 @@ class FlowTape:
                         auth_sent = True
                         await send({"type": "AUTH", "channel": 0, "token": token})
                     elif state == "UNAUTHORIZED":
-                        raise RuntimeError("jeton dxFeed refusé")
+                        raise RuntimeError("dxFeed token rejected")
                     elif state == "AUTHORIZED":
                         await send({"type": "CHANNEL_REQUEST", "channel": 1,
                                     "service": "FEED",
@@ -808,12 +808,12 @@ class FlowTape:
                                         for s in universe
                                         for e in ("TimeAndSale", "Greeks")]})
                     self._state = "connected"
-                    log.info("Order flow options actif — %d contrats sur %s",
+                    log.info("Options order flow active — %d contracts on %s",
                              len(universe), ", ".join(TRACKED))
                 elif typ == "KEEPALIVE":
                     await send({"type": "KEEPALIVE", "channel": 0})
                 elif typ == "ERROR":
-                    log.warning("dxFeed ERROR (order flow) : %s", str(m)[:200])
+                    log.warning("dxFeed ERROR (order flow): %s", str(m)[:200])
                 elif typ == "FEED_DATA":
                     now = time.time()
                     for item in m.get("data") or []:
@@ -827,7 +827,7 @@ class FlowTape:
 
                 now_mono = time.monotonic()
                 if now_mono > deadline:
-                    log.info("Order flow : renouvellement périodique de l'univers")
+                    log.info("Order flow: periodic universe refresh")
                     return
                 # Recentrage anticipé : ne se vérifie qu'après souscription (le
                 # centre n'a de sens qu'une fois la fenêtre en place) et au plus
@@ -836,8 +836,8 @@ class FlowTape:
                     next_drift_check = now_mono + DRIFT_CHECK_S
                     derive = self._drifted()
                     if derive is not None:
-                        log.info("Order flow : %s a dérivé hors fenêtre — "
-                                 "recentrage de l'univers", derive)
+                        log.info("Order flow: %s drifted out of the window — "
+                                 "recentering the universe", derive)
                         return
 
 

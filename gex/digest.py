@@ -92,15 +92,6 @@ COLORS = {"green": 0x2ECC71, "orange": 0xE67E22, "red": 0xE74C3C}
 # identique quel que soit le delta — celui-ci indique l'inventaire courant des
 # dealers, pas un côté protégé. Ce cas n'était pas couvert jusqu'au
 # 2026-09-22 : le régime qui amplifie le plus ne disait rien du risque.
-_LECTURE_RISQUE = {
-    ("Gamma Positif", "Delta Négatif"): "Réduire le risque sur les shorts | Long avec très peu de risque",
-    ("Gamma Positif", "Delta Positif"): "Réduire le risque sur les longs | Short avec très peu de risque",
-    ("Gamma Négatif", "Delta Négatif"): "Mouvements amplifiés dans les deux sens | Contrarien sans filet",
-    ("Gamma Négatif", "Delta Positif"): "Mouvements amplifiés dans les deux sens | Contrarien sans filet",
-    ("Fort Gamma Négatif", "Delta Négatif"): "Forte amplification dans les deux sens | Contrarien sans filet",
-    ("Fort Gamma Négatif", "Delta Positif"): "Forte amplification dans les deux sens | Contrarien sans filet",
-}
-
 # Familles indépendantes. Le régime réel tient à DEUX classes d'actifs, pas à
 # six marchés : SPX/SPY/ES sont trois vues du même S&P 500 ; NDX/QQQ/NQ du même
 # Nasdaq. On les agrège par famille pour ne pas compter trois fois le même
@@ -135,7 +126,10 @@ class Digest:
             parts.append(self.vix_line)
         parts += ["", self.verdict]
         if self.confidence:
-            parts.append(f"Confiance : {self.confidence.capitalize()}")
+            confidence = {"forte": "High", "moyenne": "Medium",
+                          "faible": "Low"}.get(self.confidence,
+                                                self.confidence.capitalize())
+            parts.append(f"Confidence: {confidence}")
         return "\n".join(parts)
 
     @property
@@ -156,7 +150,7 @@ def vix_grade(vix: float | None) -> dict | None:
 def _header(now: datetime) -> str:
     p = now.astimezone(PARIS)
     off = int((p.utcoffset() or pd.Timedelta(0)).total_seconds() // 3600)
-    return f"État du gamma à {p.hour}h{p.minute:02d} GMT{off:+d} (Paris)"
+    return f"Gamma state at {p.hour}:{p.minute:02d} GMT{off:+d} (Paris)"
 
 
 def _is_fort(net_gex: float, hist) -> bool:
@@ -203,14 +197,13 @@ _VIX_GRADE_EN = {"Complaisance": "Complacency", "Calme": "Calm", "Normal-haut": 
 
 
 def gamma_label(lang: str, gamma: str) -> str:
-    """Traduit un libellé de `classify()["gamma"]` pour l'interface (le bot
-    Discord reste FR, cf. _GAMMA_EN)."""
-    return _GAMMA_EN.get(gamma, gamma) if lang == "en" else gamma
+    """Map a `classify()["gamma"]` label to English for display."""
+    return _GAMMA_EN.get(gamma, gamma)
 
 
 def vix_grade_label(lang: str, label: str) -> str:
-    """Traduit un libellé de `vix_grade()["label"]` pour l'interface."""
-    return _VIX_GRADE_EN.get(label, label) if lang == "en" else label
+    """Map a `vix_grade()["label"]` label to English for display."""
+    return _VIX_GRADE_EN.get(label, label)
 _DELTA_EN = {"Delta Positif": "Positive Delta", "Delta Négatif": "Negative Delta"}
 # Clés en FR (ce sont les libellés de classify), valeurs en EN.
 _LECTURE_RISQUE_EN = {
@@ -224,7 +217,7 @@ _LECTURE_RISQUE_EN = {
 
 
 def symbol_reading(net_gex: float, net_dex: float, hist=None,
-                   lang: str = "fr") -> dict:
+                   lang: str = "en") -> dict:
     """Lecture d'UN symbole — MÊME texte que les lignes du digest (bot), pour que
     le bandeau du dashboard dise exactement la même chose. Traduit en EN si
     besoin (même structure). Renvoie {text, gamma}.
@@ -233,12 +226,9 @@ def symbol_reading(net_gex: float, net_dex: float, hist=None,
     lecture du risque (sur Gamma positif). `gamma` (FR) : pour la couleur.
     """
     c = classify(net_gex, net_dex, hist)
-    if lang == "en":
-        gamma, delta = _GAMMA_EN.get(c["gamma"], c["gamma"]), _DELTA_EN.get(c["delta"], c["delta"])
-        lecture = _LECTURE_RISQUE_EN.get((c["gamma"], c["delta"]))
-    else:
-        gamma, delta = c["gamma"], c["delta"]
-        lecture = _LECTURE_RISQUE.get((c["gamma"], c["delta"]))
+    gamma = _GAMMA_EN.get(c["gamma"], c["gamma"])
+    delta = _DELTA_EN.get(c["delta"], c["delta"])
+    lecture = _LECTURE_RISQUE_EN.get((c["gamma"], c["delta"]))
     text = f"{gamma} - {delta} ({c['gloss']})"
     if lecture:
         text += f"\n→ {lecture}"
@@ -271,19 +261,20 @@ def build_digest(rows: list[dict], vix: float | None = None,
 
     lines = []
     for (gamma, delta, gloss), syms in groupes.items():
-        lines.append(f"{gamma} - {delta} ({gloss}) sur {_liste(syms)}")
-        lecture = _LECTURE_RISQUE.get((gamma, delta))
+        lines.append(f"{_GAMMA_EN.get(gamma, gamma)} - {_DELTA_EN.get(delta, delta)} "
+                     f"({gloss}) on {_liste(syms)}")
+        lecture = _LECTURE_RISQUE_EN.get((gamma, delta))
         if lecture:
             lines.append(f"→ {lecture}")
 
     vix_line = None
     if vix is not None and vix > vix_seuil:
-        vix_line = (f"VIX supérieur à {int(vix_seuil)} (actuellement {vix:.2f}) : "
-                    "allers-retours favorables au contrarien.")
+        vix_line = (f"VIX above {int(vix_seuil)} (currently {vix:.2f}): "
+                    "favorable intraday whipsaws for contrarians.")
     elif vix is not None and vix < VIX_BAS:
-        vix_line = (f"VIX inférieur à {int(VIX_BAS)} (actuellement {vix:.2f}) : "
-                    "marché calme, mouvement directionnel possible — prudence "
-                    "pour le contrarien.")
+        vix_line = (f"VIX below {int(VIX_BAS)} (currently {vix:.2f}): "
+                    "calm market, directional move possible — caution "
+                    "for contrarians.")
 
     color, verdict, familles = _verdict(etats, vix, vix_seuil)
     confidence = _confiance_globale(familles)
@@ -300,7 +291,7 @@ def _liste(syms: list[str]) -> str:
     """« SPX, SPY et NDX » — virgules puis « et » avant le dernier."""
     if len(syms) == 1:
         return syms[0]
-    return ", ".join(syms[:-1]) + " et " + syms[-1]
+    return ", ".join(syms[:-1]) + " and " + syms[-1]
 
 
 def _intensite(c: dict) -> int:
@@ -391,24 +382,21 @@ def _verdict(etats: dict[str, dict], vix: float | None,
     fort = any(f["statut"] == "fort_neg" for f in familles.values())
 
     if fort or n_neg >= 2:
-        return "red", "Trading contrarien déconseillé sur session US.", familles
+        return "red", "Contrarian trading discouraged during the US session.", familles
     if n_neg == 1:
-        return "orange", "Trading contrarien risqué sur session US.", familles
+        return "orange", "Contrarian trading risky during the US session.", familles
     return "green", _verdict_vert(etats), familles
 
 
-# Message de clôture : on précise le sens des MM PAR INSTRUMENT tradé (futures).
+# Close message: state the MM direction PER traded instrument (futures).
 _CLOSE_SYMBOLS = ("NQ", "ES")
-_ARTICLES = {"NQ": "le NQ", "ES": "l'ES", "SPX": "le SPX", "NDX": "le NDX",
-             "SPY": "le SPY", "QQQ": "le QQQ"}
 
 
 def _join_syms(syms: list[str]) -> str:
-    """« le NQ et l'ES » — articles + « et » avant le dernier."""
-    labels = [_ARTICLES.get(s, s) for s in syms]
-    if len(labels) == 1:
-        return labels[0]
-    return ", ".join(labels[:-1]) + " et " + labels[-1]
+    """Join tickers with commas and a final 'and'."""
+    if len(syms) == 1:
+        return syms[0]
+    return ", ".join(syms[:-1]) + " and " + syms[-1]
 
 
 def _close_message(etats: dict[str, dict]) -> str:
@@ -430,24 +418,24 @@ def _close_message(etats: dict[str, dict]) -> str:
 
     parts = []
     if long_:
-        parts.append(f"**long** sur {_join_syms(long_)}")
+        parts.append(f"**long** on {_join_syms(long_)}")
     if short_:
-        parts.append(f"**short** sur {_join_syms(short_)}")
-    milieu = ("Actuellement les Market Makers sont " + " et ".join(parts) + "."
+        parts.append(f"**short** on {_join_syms(short_)}")
+    milieu = ("Market Makers are currently " + " and ".join(parts) + "."
               if parts else "")
     if ampli:
-        v = "est" if len(ampli) == 1 else "sont"
+        v = "is" if len(ampli) == 1 else "are"
         amp = _join_syms(ampli)
         amp = amp[:1].upper() + amp[1:]          # 1re lettre seulement (garder « ES »)
-        warn = (f"⚠️ {amp} {v} en régime **amplificateur de mouvement** — ça "
-                f"risque de mal se passer.")
+        warn = (f"⚠️ {amp} {v} in a **movement-amplifying** regime — it "
+                f"could get ugly.")
         milieu = f"{milieu} {warn}" if milieu else warn
     if not milieu:
-        milieu = "Positionnement des Market Makers indéterminé (pas de données NQ/ES)."
+        milieu = "Market Maker positioning unknown (no NQ/ES data)."
 
-    return ("🔒 Stop le trading contrarien si tu n'es pas en position ; si tu es en "
-            "position, sors dès que tu peux. " + milieu +
-            " Verrouille ton trading et va profiter de ta soirée. 🌙")
+    return ("🔒 Stop contrarian trading if you are flat; if you are in "
+            "a position, get out as soon as you can. " + milieu +
+            " Lock in your trading and go enjoy your evening. 🌙")
 
 
 def _verdict_vert(etats: dict[str, dict]) -> str:
@@ -457,12 +445,12 @@ def _verdict_vert(etats: dict[str, dict]) -> str:
     n_neg = sum(1 for e in etats.values() if e["delta"] == "Delta Négatif")
     n_pos = sum(1 for e in etats.values() if e["delta"] == "Delta Positif")
     if n_neg > n_pos:      # marché majoritairement Delta− → longs favorisés
-        return ("Trading contrarien sur session US : très peu de risque sur les "
-                "longs, risqué sur les shorts.")
+        return ("Contrarian trading during the US session: very little risk on "
+                "longs, risky on shorts.")
     if n_pos > n_neg:      # Delta+ → shorts favorisés
-        return ("Trading contrarien sur session US : très peu de risque sur les "
-                "shorts, risqué sur les longs.")
-    return "Trading contrarien avec peu de risque sur session US."
+        return ("Contrarian trading during the US session: very little risk on "
+                "shorts, risky on longs.")
+    return "Contrarian trading with little risk during the US session."
 
 
 # --------------------------------------------------------------------------

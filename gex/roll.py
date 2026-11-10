@@ -50,7 +50,7 @@ def load_state() -> dict:
     try:
         return json.loads(p.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001 — un état illisible ne doit rien bloquer
-        log.exception("État de roll illisible — repartir d'un état vide")
+        log.exception("Unreadable roll state — starting from an empty state")
         return {}
 
 
@@ -120,7 +120,7 @@ def dominant(symbol: str, session: str, contracts: list[str],
         if any(vols.values()):
             best = max(vols, key=lambda c: vols[c])
             if best != contracts[0]:
-                log.info("Roll %s : séance %s écrite sur %s (volume %s = %s vs %s = %s)",
+                log.info("Roll %s: session %s written to %s (volume %s = %s vs %s = %s)",
                          symbol, session, best, best, vols[best],
                          contracts[0], vols[contracts[0]])
             return best

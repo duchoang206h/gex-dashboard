@@ -167,7 +167,7 @@ python3 -m venv .venv
 Après la dernière commande, il reste écrit quelque chose comme :
 
 ```
-Dash is running on http://127.0.0.1:8050/
+Dash is running on http://127.0.0.1:9050/
 ```
 
 C'est bon signe : **le programme tourne**. Laisse cette fenêtre ouverte — c'est
@@ -178,7 +178,7 @@ elle qui fait fonctionner le dashboard.
 ## Étape 5 — Ouvrir le dashboard
 
 1. Ouvre ton navigateur habituel (Chrome, Edge, Firefox, Safari…).
-2. Dans la barre d'adresse, tape exactement : **`127.0.0.1:8050`** puis Entrée.
+2. Dans la barre d'adresse, tape exactement : **`127.0.0.1:9050`** puis Entrée.
 3. Le dashboard s'affiche. 🎉
 
 Il commence à collecter les données immédiatement. Les premières valeurs
@@ -210,7 +210,7 @@ au fil des jours d'utilisation.
 | `command not found: python` (Mac) | Sur Mac la commande est `python3` | Utilise **`python3`** au lieu de `python` |
 | La barre d'adresse ne veut pas de `powershell` | Fenêtre pas au premier plan | Reclique dans le dossier, puis dans la barre d'adresse, retape `powershell` |
 | `pip install` s'arrête sur une erreur rouge | Coupure réseau pendant le téléchargement | Relance simplement la même commande `pip install …` |
-| Le navigateur affiche « site inaccessible » | Le terminal a été fermé, ou tu as tapé la mauvaise adresse | Vérifie que la fenêtre du terminal est toujours ouverte et affiche *Dash is running*, et que tu as tapé `127.0.0.1:8050` |
+| Le navigateur affiche « site inaccessible » | Le terminal a été fermé, ou tu as tapé la mauvaise adresse | Vérifie que la fenêtre du terminal est toujours ouverte et affiche *Dash is running*, et que tu as tapé `127.0.0.1:9050` |
 | Une fenêtre de pare-feu demande une autorisation au premier lancement | Windows demande si le programme peut accéder au réseau | Autorise (c'est nécessaire pour récupérer les données) |
 
 Si tu es vraiment bloqué, note le message d'erreur exact et demande de l'aide à

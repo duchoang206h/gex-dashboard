@@ -1,7 +1,7 @@
 """Regénère les captures d'écran du guide depuis le dashboard qui tourne.
 
 Outillage hors du paquet : Playwright n'est PAS une dépendance du projet.
-Le dashboard doit tourner sur http://127.0.0.1:8050 avant de lancer ce script.
+Le dashboard doit tourner sur http://127.0.0.1:9050 avant de lancer ce script.
 
     pip install playwright        # le binaire chromium est déjà en cache
     python tools/screenshots.py
@@ -22,7 +22,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 OUT = Path(__file__).resolve().parent.parent / "docs" / "screenshots"
-URL = "http://127.0.0.1:8050"
+URL = "http://127.0.0.1:9050"
 
 # onglet -> (valeur du dcc.Tab, id du panneau, nom de fichier)
 ONGLETS = [

@@ -120,7 +120,7 @@ The MCP server then lets you query your own data in natural language
 ```
 python -m venv .venv
 .venv/bin/pip install -r requirements.txt        # Windows: .venv\Scripts\pip
-.venv/bin/python run.py                          # dashboard on http://127.0.0.1:8050
+.venv/bin/python run.py                          # dashboard on http://127.0.0.1:9050
 ```
 
 Tests: `.venv/bin/python -m pytest tests/`

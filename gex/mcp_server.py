@@ -52,7 +52,7 @@ def _preferred_symbol(symbol: str) -> str:
 def _check_symbol(symbol: str) -> str:
     symbol = symbol.upper()
     if symbol not in UNDERLYINGS:
-        raise ValueError(f"Symbole inconnu {symbol} — choix : {list(UNDERLYINGS)}")
+        raise ValueError(f"Unknown symbol {symbol} — choices: {list(UNDERLYINGS)}")
     return symbol
 
 
@@ -63,11 +63,11 @@ def get_gex_summary(symbol: str = "SPX") -> str:
     symbol = _preferred_symbol(_check_symbol(symbol))
     path = SETTINGS.data_dir / "history" / "metrics.parquet"
     if not path.exists():
-        return "Aucun historique — le dashboard n'a pas encore tourné."
+        return "No history — the dashboard has not run yet."
     df = pd.read_parquet(path)
     df = df[df["symbol"] == symbol].sort_values("timestamp")
     if df.empty:
-        return f"Aucune donnée pour {symbol}."
+        return f"No data for {symbol}."
     last = df.iloc[-1].to_dict()
     last["timestamp"] = str(last["timestamp"])
     out = {"dernier": last, "nb_snapshots": len(df)}
@@ -87,7 +87,7 @@ def get_gex_by_strike(symbol: str = "SPX", top_n: int = 15) -> str:
     symbol = _preferred_symbol(_check_symbol(symbol))
     path = _latest_snapshot_path(symbol)
     if path is None:
-        return "Aucun snapshot — le dashboard n'a pas encore tourné."
+        return "No snapshot — the dashboard has not run yet."
     df = pd.read_parquet(path)
     agg = df.groupby("strike").agg(
         gex_net=("gex", "sum"), oi=("open_interest", "sum")
@@ -98,7 +98,7 @@ def get_gex_by_strike(symbol: str = "SPX", top_n: int = 15) -> str:
         {
             "strike": float(r.strike),
             "gex_net_dollars": float(r.gex_net),
-            "cote": "calls (support/pin)" if r.gex_net > 0 else "puts (accélération)",
+            "cote": "calls (support/pin)" if r.gex_net > 0 else "puts (acceleration)",
             "open_interest": float(r.oi),
         }
         for r in top.itertuples()
@@ -165,11 +165,11 @@ def get_market_context(symbol: str = "SPX") -> str:
     symbol = _preferred_symbol(_check_symbol(symbol))
     metrics_path = SETTINGS.data_dir / "history" / "metrics.parquet"
     if not metrics_path.exists():
-        return "Aucun historique — le dashboard n'a pas encore tourné."
+        return "No history — the dashboard has not run yet."
     hist = pd.read_parquet(metrics_path)
     hist = hist[hist["symbol"] == symbol].sort_values("timestamp")
     if hist.empty:
-        return f"Aucune donnée pour {symbol}."
+        return f"No data for {symbol}."
     last = hist.iloc[-1]
     spot = float(last["spot"])
     zero_gamma = float(last["zero_gamma"]) if pd.notna(last.get("zero_gamma")) else None
@@ -217,7 +217,7 @@ def get_flow_delta(symbol: str = "SPX", day: str | None = None) -> str:
     day = day or datetime.now(ET).strftime("%Y-%m-%d")
     path = SETTINGS.data_dir / "flows" / symbol / f"{day}.parquet"
     if not path.exists():
-        return f"Aucun flux pour {symbol} le {day}."
+        return f"No flow for {symbol} on {day}."
     df = pd.read_parquet(path).sort_values("timestamp")
     recent = df.tail(30)[["timestamp", "flow_total", "flow_0dte"]]
     recent["timestamp"] = recent["timestamp"].astype(str)
@@ -238,7 +238,7 @@ def get_history(symbol: str = "SPX", last_n: int = 50) -> str:
     symbol = _preferred_symbol(_check_symbol(symbol))
     path = SETTINGS.data_dir / "history" / "metrics.parquet"
     if not path.exists():
-        return "Aucun historique."
+        return "No history."
     df = pd.read_parquet(path)
     df = df[df["symbol"] == symbol].sort_values("timestamp").tail(last_n)
     df["timestamp"] = df["timestamp"].astype(str)
@@ -260,11 +260,11 @@ def get_log_tail(lines: int = 50, level: str | None = None) -> str:
     level optionnel pour filtrer (ex. 'ERROR', 'WARNING')."""
     from .logsetup import LOG_FILE
     if not LOG_FILE.exists():
-        return "Aucun log (le dashboard n'a pas encore tourné avec la journalisation)."
+        return "No log (the dashboard has not run yet with logging enabled)."
     rows = LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
     if level:
         rows = [r for r in rows if f" {level.upper()} " in r]
-    return "\n".join(rows[-lines:]) or "Aucune ligne correspondante."
+    return "\n".join(rows[-lines:]) or "No matching line."
 
 
 def main() -> None:

@@ -88,7 +88,7 @@ def nearest(rungs: list[Rung]) -> tuple[Rung | None, Rung | None]:
             max(below, key=lambda r: r.dist) if below else None)
 
 
-def session_state(now_et: datetime, lang: str = "fr") -> tuple[str, str]:
+def session_state(now_et: datetime, lang: str = "en") -> tuple[str, str]:
     """(code, libellé court) de l'état de séance US en heure de New York :
     `closed`, `pre`, `open`, `late` (après la coupure contrarienne de 16h15 Paris)."""
     if now_et.weekday() >= 5:
@@ -127,7 +127,7 @@ def move_threshold(symbol: str) -> float:
 
 
 def assess(symbol: str, move_pts: float | None, net_musd: float, gross_musd: float,
-           gamma_negative: bool, dist_to_flip: float | None, lang: str = "fr",
+           gamma_negative: bool, dist_to_flip: float | None, lang: str = "en",
            *, swing: bool = False) -> dict:
     """État d'amplification sur la fenêtre de 5 min.
 
@@ -157,8 +157,8 @@ def assess(symbol: str, move_pts: float | None, net_musd: float, gross_musd: flo
     lights = {"mouvement": direction != 0,
               "flux": direction != 0 and flow_dir == direction,
               "gamma": gamma_light}
-    side = i18n._SIDE_WORD[lang][direction] if direction else ""     # accorde avec « amplification »
-    side_m = i18n._SIDE_WORD_M[lang][direction] if direction else "" # accorde avec « mouvement »
+    side = i18n._SIDE_WORD[direction] if direction else ""
+    side_m = i18n._SIDE_WORD_M[direction] if direction else ""
     flux_txt = (i18n.t(lang, "sc_flux_net", net=net_musd, ratio=ratio) if gross_musd > 0
                 else i18n.t(lang, "sc_flux_none"))
     gamma_txt = i18n.t(lang, "sc_gamma_negatif" if gamma_negative else "sc_gamma_positif")
