@@ -7,13 +7,13 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
 from gex.config import SETTINGS
 from gex.core import SCHEMA_VERSION
-import glob as _glob
 
 
 def list_snapshot_manifests(base: Path | None = None) -> list[dict[str, Any]]:
@@ -50,11 +50,17 @@ def manifests_dir(base: Path | None = None) -> Path:
 
 def write_json_atomic(path: Path, payload: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
-        f.write("\n")
-    os.replace(tmp, path)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
+    try:
+        with tmp.open("w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
+            f.write("\n")
+        os.replace(tmp, path)
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 def read_json(path: Path) -> dict[str, Any] | None:

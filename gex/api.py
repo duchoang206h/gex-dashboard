@@ -533,9 +533,9 @@ def register_api(app) -> None:
         import json as _json
         from flask import Response
         from .serve.stream import STREAM_BUS
-        sub = STREAM_BUS.subscribe()
 
         def gen():
+            sub = STREAM_BUS.subscribe()
             try:
                 last_hb = time.monotonic()
                 while True:

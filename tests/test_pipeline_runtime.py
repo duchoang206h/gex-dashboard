@@ -65,14 +65,18 @@ def test_runtime_enabled_updates_read_model_events_and_manifest(monkeypatch, tmp
 
 
 def test_runtime_error_is_captured_without_raising(monkeypatch):
+    import gex.compute.pipeline as cp
     import gex.rates
     monkeypatch.setattr(gex.rates, "current_rate", lambda: 0.045)
     rt = RewriteRuntime(enabled=True)
 
-    # broken snapshot (missing symbol attr behavior handled) - force failure by passing object without expected attrs
-    class Bad:  # missing symbol/options/spot
-        pass
+    snap = make_chain("SPX")
 
-    rt.on_legacy_snapshot(Bad(), None, None)
-    # should not raise; no symbol state guaranteed, but runtime survives
-    assert isinstance(rt.read_model, object)
+    def boom(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(cp, "wrap_raw_snapshot", boom)
+    rt.on_legacy_snapshot(snap, None, None)
+    st = rt.read_model.get("SPX")
+    assert st is not None
+    assert st.last_error == "rewrite side-channel update failed"

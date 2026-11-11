@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -51,6 +52,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_summary_symbol_ts ON summary_history(symbol, timestamp)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_summary_symbol_id ON summary_history(symbol, id)")
     conn.commit()
 
 
@@ -72,7 +74,7 @@ def index_summary(symbol: str, summary: Any, provenance: dict[str, Any] | None =
                   *, base: Path | None = None) -> None:
     row = _summary_row(summary)
     prov = provenance or {}
-    with _connect(base) as conn:
+    with closing(_connect(base)) as conn:
         ensure_schema(conn)
         conn.execute(
             """
@@ -101,7 +103,7 @@ def index_summary(symbol: str, summary: Any, provenance: dict[str, Any] | None =
 
 
 def get_latest_summary(symbol: str, *, base: Path | None = None) -> dict[str, Any] | None:
-    with _connect(base) as conn:
+    with closing(_connect(base)) as conn:
         ensure_schema(conn)
         cur = conn.execute(
             "SELECT symbol,timestamp,spot,net_gex,net_gex_0dte,zero_gamma,net_dex,pc_oi,pc_volume,basis,source,schema_version,provenance_json FROM summary_history WHERE symbol=? ORDER BY id DESC LIMIT 1",
@@ -120,7 +122,7 @@ def get_latest_summary(symbol: str, *, base: Path | None = None) -> dict[str, An
 
 
 def get_history(symbol: str, last_n: int = 50, *, base: Path | None = None) -> list[dict[str, Any]]:
-    with _connect(base) as conn:
+    with closing(_connect(base)) as conn:
         ensure_schema(conn)
         cur = conn.execute(
             "SELECT symbol,timestamp,spot,net_gex,net_gex_0dte,zero_gamma,net_dex,pc_oi,pc_volume,basis,source,schema_version FROM summary_history WHERE symbol=? ORDER BY id DESC LIMIT ?",

@@ -94,6 +94,24 @@ class ReadModel:
             return {"symbol": symbol, "available": False}
         prov = st.provenance
         quality = prov.quality.as_dict() if prov else None
+        # derive staleness hint from provider timestamp age (best-effort)
+        if quality is not None and prov and prov.provider_timestamp:
+            try:
+                pts = prov.provider_timestamp
+                if pts.tzinfo is None:
+                    # naive feed timestamps are stored in ET historically; compare conservatively in UTC-ish by assuming local ET is not critical here
+                    # fallback: treat as not stale if parsing ambiguous
+                    now = datetime.now()
+                    age_s = (now.replace(tzinfo=None) - pts.replace(tzinfo=None)).total_seconds()
+                else:
+                    age_s = (_utcnow() - pts.astimezone(timezone.utc)).total_seconds()
+                # delayed sources can legitimately lag ~15 min; mark stale only when clearly stuck
+                if age_s > 45 * 60:
+                    quality = {**quality, "stale": True, "feed_age_s": int(age_s)}
+                else:
+                    quality = {**quality, "feed_age_s": max(0, int(age_s))}
+            except Exception:
+                pass
         return {
             "symbol": symbol,
             "available": st.enriched is not None or st.summary is not None,

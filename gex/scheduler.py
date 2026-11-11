@@ -147,6 +147,16 @@ def pull_symbol(symbol: str, persist_snapshot: bool) -> None:
 _CONSTITUENT_PULL_LOCK = threading.Lock()
 
 
+def _record_rewrite_pull_error(symbol: str, err: Exception) -> None:
+    try:
+        from .pipeline.runtime import RUNTIME, rewrite_enabled
+        if rewrite_enabled() or RUNTIME.enabled:
+            RUNTIME.enabled = True
+            RUNTIME.read_model.record_error(symbol, f"pull failed: {err}")
+    except Exception:
+        pass
+
+
 def pull_constituents(persist_snapshot: bool) -> None:
     """Rafraîchit les constituants HORS du cycle cibles.
 
@@ -169,6 +179,7 @@ def pull_constituents(persist_snapshot: bool) -> None:
                 log.exception("Pull failed %s", key)
                 with STATE.lock:
                     STATE.last_error = f"{key}: {e}"
+                _record_rewrite_pull_error(key, e)
     finally:
         _CONSTITUENT_PULL_LOCK.release()
 
@@ -298,6 +309,7 @@ def pull_all(force: bool = False, include_constituents: bool = True) -> None:
             log.exception("Pull failed %s", key)
             with STATE.lock:
                 STATE.last_error = f"{key}: {e}"
+            _record_rewrite_pull_error(key, e)
 
 
 def push_data_repo() -> None:

@@ -13,9 +13,13 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
+import logging
+
 from gex.core import EnrichedSnapshotMeta, EventBus, topics
 from gex.state import ReadModel
 from gex.compute import pipeline as compute_pipeline
+
+log = logging.getLogger(__name__)
 
 
 def _env_on(name: str) -> bool:
@@ -79,7 +83,7 @@ class RewriteRuntime:
                 from gex.storage.metadata import write_snapshot_manifest
                 write_snapshot_manifest(symbol, prov.as_dict(), rows=rows)
             except Exception:
-                pass
+                log.debug("rewrite manifest write failed for %s", symbol, exc_info=True)
             # optional indexed hot-query backend (phase 4) - default off
             if self.index or index_enabled():
                 try:
@@ -87,7 +91,7 @@ class RewriteRuntime:
                     if summary is not None:
                         index_summary(symbol, summary, prov.as_dict())
                 except Exception:
-                    pass
+                    log.debug("rewrite index update failed for %s", symbol, exc_info=True)
         except Exception:
             # must never impact legacy path
             try:
