@@ -58,8 +58,8 @@ Issues = "https://github.com/Darthreign/gex-dashboard/issues"
 gex-dashboard = "gex.run:main"
 gex-mcp = "gex.mcp_server:main"
 
-[tool.setuptools]
-packages = ["gex"]
+[tool.setuptools.packages.find]
+include = ["gex", "gex.*"]
 
 [tool.setuptools.package-data]
 # CSS et page FAQ : servis par Dash, ils doivent voyager avec le code.
